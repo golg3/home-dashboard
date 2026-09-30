@@ -1,0 +1,2327 @@
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from collections import deque
+from datetime import datetime
+from urllib.request import urlopen, Request
+from urllib.parse import urlencode
+import json
+import os
+from fastapi.responses import RedirectResponse, HTMLResponse
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from googleapiclient.discovery import build
+import asyncio
+import math
+import threading
+
+from fastapi import WebSocket, WebSocketDisconnect
+from obsws_python.subs import Subs
+
+app = FastAPI(title="Home Dashboard API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+TOKEN = os.getenv("AGENT_TOKEN", "change-me")
+
+# YouTube Live Chat
+YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID", "")
+YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET", "")
+YOUTUBE_REDIRECT_URI = os.getenv("YOUTUBE_REDIRECT_URI", "")
+YOUTUBE_TOKEN_FILE = "/app/youtube-data/token.json"
+
+YOUTUBE_SCOPES = [
+    "https://www.googleapis.com/auth/youtube.readonly"
+]
+
+
+latest = {}
+history = deque(maxlen=720)
+
+
+class Metrics(BaseModel):
+    hostname: str
+    cpu: float
+    ram: float
+    ram_used_gb: float = 0
+    ram_total_gb: float = 0
+
+    gpu: float = 0
+    vram: float = 0
+    vram_used_gb: float = 0
+    vram_total_gb: float = 0
+
+    cpu_temp: float | None = None
+    gpu_temp: float | None = None
+
+    disk_percent: float = 0
+    net_down_mbps: float = 0
+    net_up_mbps: float = 0
+
+    uptime: str = ""
+    gpu_name: str = ""
+    timestamp: str | None = None
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@app.post("/api/metrics")
+def ingest(
+    m: Metrics,
+    authorization: str | None = Header(default=None)
+):
+    if authorization != f"Bearer {TOKEN}":
+        raise HTTPException(401, "invalid token")
+
+    d = m.model_dump()
+    d["timestamp"] = d["timestamp"] or datetime.now().isoformat()
+
+    latest.update(d)
+    history.append(d)
+
+    return {"ok": True}
+
+
+@app.get("/api/metrics")
+def get_metrics():
+    return latest
+
+
+@app.get("/api/history")
+def get_history():
+    return list(history)
+
+
+# ---------------------------------------------------------
+# WEATHER
+# ---------------------------------------------------------
+
+WEATHER_CODES = {
+    0: "Açık",
+    1: "Çoğunlukla açık",
+    2: "Parçalı bulutlu",
+    3: "Kapalı",
+    45: "Sisli",
+    48: "Kırağılı sis",
+    51: "Hafif çisenti",
+    53: "Çisenti",
+    55: "Yoğun çisenti",
+    56: "Hafif donan çisenti",
+    57: "Donan çisenti",
+    61: "Hafif yağmur",
+    63: "Yağmur",
+    65: "Kuvvetli yağmur",
+    66: "Hafif donan yağmur",
+    67: "Donan yağmur",
+    71: "Hafif kar",
+    73: "Kar",
+    75: "Yoğun kar",
+    77: "Kar taneleri",
+    80: "Hafif sağanak",
+    81: "Sağanak",
+    82: "Kuvvetli sağanak",
+    85: "Hafif kar sağanağı",
+    86: "Kuvvetli kar sağanağı",
+    95: "Gök gürültülü fırtına",
+    96: "Dolu ihtimalli fırtına",
+    99: "Şiddetli dolulu fırtına"
+}
+
+
+def weather_description(code):
+    return WEATHER_CODES.get(code, "Bilinmiyor")
+
+
+def weather_icon(code, is_day=1):
+    if code == 0:
+        return "☀️" if is_day else "🌙"
+
+    if code in [1, 2]:
+        return "🌤️" if is_day else "☁️"
+
+    if code == 3:
+        return "☁️"
+
+    if code in [45, 48]:
+        return "🌫️"
+
+    if code in [51, 53, 55, 56, 57]:
+        return "🌦️"
+
+    if code in [61, 63, 65, 66, 67, 80, 81, 82]:
+        return "🌧️"
+
+    if code in [71, 73, 75, 77, 85, 86]:
+        return "🌨️"
+
+    if code in [95, 96, 99]:
+        return "⛈️"
+
+    return "🌡️"
+
+
+@app.get("/api/weather")
+def get_weather(
+    lat: float = Query(41.0333),
+    lon: float = Query(30.3075),
+    name: str = Query("Kaynarca, Sakarya")
+):
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+
+        "current": ",".join([
+            "temperature_2m",
+            "apparent_temperature",
+            "relative_humidity_2m",
+            "precipitation",
+            "weather_code",
+            "surface_pressure",
+            "wind_speed_10m",
+            "wind_direction_10m",
+            "is_day"
+        ]),
+
+        "hourly": ",".join([
+            "temperature_2m",
+            "apparent_temperature",
+            "precipitation_probability",
+            "weather_code"
+        ]),
+
+        "daily": ",".join([
+            "weather_code",
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "precipitation_probability_max",
+            "sunrise",
+            "sunset"
+        ]),
+
+        "timezone": "auto",
+        "forecast_days": 7
+    }
+
+    url = (
+        "https://api.open-meteo.com/v1/forecast?"
+        + urlencode(params)
+    )
+
+    try:
+        req = Request(
+            url,
+            headers={
+                "User-Agent": "HomeDashboard/1.0"
+            }
+        )
+
+        with urlopen(req, timeout=10) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Hava servisine ulaşılamadı: {str(e)}"
+        )
+
+    current = raw.get("current", {})
+    hourly = raw.get("hourly", {})
+    daily = raw.get("daily", {})
+
+    current_code = current.get("weather_code", 0)
+    current_is_day = current.get("is_day", 1)
+
+    hourly_result = []
+
+    times = hourly.get("time", [])
+
+    for i in range(len(times)):
+        code = hourly["weather_code"][i]
+
+        hourly_result.append({
+            "time": times[i],
+            "temperature": hourly["temperature_2m"][i],
+            "apparent_temperature":
+                hourly["apparent_temperature"][i],
+            "precipitation_probability":
+                hourly["precipitation_probability"][i],
+            "weather_code": code,
+            "description": weather_description(code),
+            "icon": weather_icon(code, 1)
+        })
+
+    daily_result = []
+
+    dates = daily.get("time", [])
+
+    for i in range(len(dates)):
+        code = daily["weather_code"][i]
+
+        daily_result.append({
+            "date": dates[i],
+            "weather_code": code,
+            "description": weather_description(code),
+            "icon": weather_icon(code, 1),
+            "max": daily["temperature_2m_max"][i],
+            "min": daily["temperature_2m_min"][i],
+            "precipitation_probability":
+                daily["precipitation_probability_max"][i],
+            "sunrise": daily["sunrise"][i],
+            "sunset": daily["sunset"][i]
+        })
+
+    return {
+        "location": {
+            "name": name,
+            "latitude": raw.get("latitude"),
+            "longitude": raw.get("longitude"),
+            "timezone": raw.get("timezone")
+        },
+
+        "current": {
+            "temperature": current.get("temperature_2m"),
+            "apparent_temperature":
+                current.get("apparent_temperature"),
+            "humidity":
+                current.get("relative_humidity_2m"),
+            "precipitation":
+                current.get("precipitation"),
+            "pressure":
+                current.get("surface_pressure"),
+            "wind_speed":
+                current.get("wind_speed_10m"),
+            "wind_direction":
+                current.get("wind_direction_10m"),
+            "weather_code": current_code,
+            "description":
+                weather_description(current_code),
+            "icon":
+                weather_icon(current_code, current_is_day),
+            "is_day": current_is_day,
+            "time": current.get("time")
+        },
+
+        "hourly": hourly_result,
+        "daily": daily_result
+    }
+# ---------------------------------------------------------
+# DOCKER MONITORING
+# ---------------------------------------------------------
+
+import socket
+import urllib.parse
+import time
+
+
+DOCKER_SOCKET = "/var/run/docker.sock"
+
+
+def docker_request(path):
+    """
+    Docker Engine API'ye Unix socket üzerinden
+    yalnızca GET isteği gönderir.
+    """
+
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+    try:
+        s.settimeout(5)
+        s.connect(DOCKER_SOCKET)
+
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: docker\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        )
+
+        s.sendall(request.encode())
+
+        data = b""
+
+        while True:
+            chunk = s.recv(65536)
+
+            if not chunk:
+                break
+
+            data += chunk
+
+    finally:
+        s.close()
+
+    header, body = data.split(b"\r\n\r\n", 1)
+
+    status_line = header.split(b"\r\n", 1)[0]
+
+    if b"200" not in status_line:
+        raise RuntimeError(
+            status_line.decode(
+                errors="ignore"
+            )
+        )
+
+    # Docker bazen chunked encoding döndürür.
+    if b"transfer-encoding: chunked" in header.lower():
+
+        decoded = b""
+        rest = body
+
+        while rest:
+
+            line_end = rest.find(b"\r\n")
+
+            if line_end < 0:
+                break
+
+            size_line = rest[:line_end]
+
+            try:
+                size = int(
+                    size_line.split(b";")[0],
+                    16
+                )
+            except:
+                break
+
+            if size == 0:
+                break
+
+            start = line_end + 2
+            end = start + size
+
+            decoded += rest[start:end]
+
+            rest = rest[end + 2:]
+
+        body = decoded
+
+    return json.loads(
+        body.decode("utf-8")
+    )
+
+
+def format_bytes(value):
+
+    value = float(value or 0)
+
+    units = [
+        "B",
+        "KB",
+        "MB",
+        "GB",
+        "TB"
+    ]
+
+    for unit in units:
+
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+
+        value /= 1024
+
+    return f"{value:.1f} PB"
+
+
+def calculate_cpu(stats):
+
+    try:
+
+        cpu_delta = (
+            stats["cpu_stats"]["cpu_usage"]["total_usage"]
+            -
+            stats["precpu_stats"]["cpu_usage"]["total_usage"]
+        )
+
+        system_delta = (
+            stats["cpu_stats"]["system_cpu_usage"]
+            -
+            stats["precpu_stats"]["system_cpu_usage"]
+        )
+
+        cpu_count = (
+            stats["cpu_stats"]
+            .get("online_cpus")
+            or
+            len(
+                stats["cpu_stats"]
+                ["cpu_usage"]
+                .get(
+                    "percpu_usage",
+                    []
+                )
+            )
+            or 1
+        )
+
+        if system_delta > 0 and cpu_delta > 0:
+
+            return (
+                cpu_delta /
+                system_delta *
+                cpu_count *
+                100
+            )
+
+    except:
+        pass
+
+    return 0
+
+
+@app.get("/api/docker/containers")
+def docker_containers():
+
+    try:
+
+        containers = docker_request(
+            "/containers/json?all=1"
+        )
+
+        result = []
+
+        for c in containers:
+
+            cid = c["Id"]
+
+            name = (
+                c.get("Names", ["unknown"])[0]
+                .lstrip("/")
+            )
+
+            state = c.get(
+                "State",
+                "unknown"
+            )
+
+            status = c.get(
+                "Status",
+                ""
+            )
+
+            image = c.get(
+                "Image",
+                ""
+            )
+
+
+            inspect = docker_request(
+                f"/containers/{cid}/json"
+            )
+
+
+            health = (
+                inspect
+                .get("State", {})
+                .get("Health", {})
+                .get(
+                    "Status",
+                    None
+                )
+            )
+
+
+            started_at = (
+                inspect
+                .get("State", {})
+                .get(
+                    "StartedAt",
+                    ""
+                )
+            )
+
+
+            networks = (
+                inspect
+                .get(
+                    "NetworkSettings",
+                    {}
+                )
+                .get(
+                    "Networks",
+                    {}
+                )
+            )
+
+
+            ips = []
+
+            for network_name, network in networks.items():
+
+                ip = network.get(
+                    "IPAddress"
+                )
+
+                if ip:
+
+                    ips.append({
+                        "network":
+                            network_name,
+
+                        "ip":
+                            ip
+                    })
+
+
+            ports = []
+
+            for p in c.get(
+                "Ports",
+                []
+            ):
+
+                private_port = p.get(
+                    "PrivatePort"
+                )
+
+                public_port = p.get(
+                    "PublicPort"
+                )
+
+                protocol = p.get(
+                    "Type",
+                    "tcp"
+                )
+
+                if public_port:
+
+                    ports.append(
+                        f"{public_port}:{private_port}/{protocol}"
+                    )
+
+                else:
+
+                    ports.append(
+                        f"{private_port}/{protocol}"
+                    )
+
+
+            cpu_percent = 0
+            memory_usage = 0
+            memory_limit = 0
+            memory_percent = 0
+
+            net_rx = 0
+            net_tx = 0
+
+
+            if state == "running":
+
+                try:
+
+                    stats = docker_request(
+                        f"/containers/{cid}/stats?stream=false"
+                    )
+
+                    cpu_percent = calculate_cpu(
+                        stats
+                    )
+
+
+                    memory_stats = stats.get(
+                        "memory_stats",
+                        {}
+                    )
+
+                    memory_usage = (
+                        memory_stats
+                        .get(
+                            "usage",
+                            0
+                        )
+                    )
+
+                    memory_limit = (
+                        memory_stats
+                        .get(
+                            "limit",
+                            0
+                        )
+                    )
+
+
+                    if memory_limit:
+
+                        memory_percent = (
+                            memory_usage /
+                            memory_limit *
+                            100
+                        )
+
+
+                    for net in (
+                        stats
+                        .get(
+                            "networks",
+                            {}
+                        )
+                        .values()
+                    ):
+
+                        net_rx += net.get(
+                            "rx_bytes",
+                            0
+                        )
+
+                        net_tx += net.get(
+                            "tx_bytes",
+                            0
+                        )
+
+                except Exception:
+                    pass
+
+
+            result.append({
+
+                "id":
+                    cid[:12],
+
+                "name":
+                    name,
+
+                "image":
+                    image,
+
+                "state":
+                    state,
+
+                "status":
+                    status,
+
+                "health":
+                    health,
+
+                "started_at":
+                    started_at,
+
+                "cpu":
+                    round(
+                        cpu_percent,
+                        2
+                    ),
+
+                "memory_usage":
+                    memory_usage,
+
+                "memory_limit":
+                    memory_limit,
+
+                "memory_percent":
+                    round(
+                        memory_percent,
+                        1
+                    ),
+
+                "memory_usage_text":
+                    format_bytes(
+                        memory_usage
+                    ),
+
+                "memory_limit_text":
+                    format_bytes(
+                        memory_limit
+                    ),
+
+                "network_rx":
+                    net_rx,
+
+                "network_tx":
+                    net_tx,
+
+                "network_rx_text":
+                    format_bytes(
+                        net_rx
+                    ),
+
+                "network_tx_text":
+                    format_bytes(
+                        net_tx
+                    ),
+
+                "ips":
+                    ips,
+
+                "ports":
+                    ports
+
+            })
+
+
+        result.sort(
+            key=lambda x: (
+                x["state"] != "running",
+                x["name"].lower()
+            )
+        )
+
+
+        return result
+
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=
+            f"Docker bilgileri alınamadı: {e}"
+        )
+
+
+@app.get("/api/docker/summary")
+def docker_summary():
+
+    try:
+
+        info = docker_request(
+            "/info"
+        )
+
+        return {
+
+            "name":
+                info.get(
+                    "Name",
+                    ""
+                ),
+
+            "docker_version":
+                info.get(
+                    "ServerVersion",
+                    ""
+                ),
+
+            "containers":
+                info.get(
+                    "Containers",
+                    0
+                ),
+
+            "running":
+                info.get(
+                    "ContainersRunning",
+                    0
+                ),
+
+            "paused":
+                info.get(
+                    "ContainersPaused",
+                    0
+                ),
+
+            "stopped":
+                info.get(
+                    "ContainersStopped",
+                    0
+                ),
+
+            "images":
+                info.get(
+                    "Images",
+                    0
+                ),
+
+            "cpus":
+                info.get(
+                    "NCPU",
+                    0
+                ),
+
+            "memory":
+                info.get(
+                    "MemTotal",
+                    0
+                ),
+
+            "memory_text":
+                format_bytes(
+                    info.get(
+                        "MemTotal",
+                        0
+                    )
+                ),
+
+            "os":
+                info.get(
+                    "OperatingSystem",
+                    ""
+                ),
+
+            "kernel":
+                info.get(
+                    "KernelVersion",
+                    ""
+                )
+
+        }
+
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=
+            f"Docker bilgileri alınamadı: {e}"
+        )
+# ---------------------------------------------------------
+# OBS STUDIO
+# ---------------------------------------------------------
+
+import obsws_python as obs
+import base64
+
+OBS_HOST = os.getenv("OBS_HOST", "10.29.250.13")
+OBS_PORT = int(os.getenv("OBS_PORT", "4455"))
+OBS_PASSWORD = os.getenv("OBS_PASSWORD", "")
+
+
+_obs_req_client = None
+_obs_req_lock = threading.RLock()
+
+
+def _obs_connect():
+    global _obs_req_client
+
+    if _obs_req_client is None:
+        _obs_req_client = obs.ReqClient(
+            host=OBS_HOST,
+            port=OBS_PORT,
+            password=OBS_PASSWORD,
+            timeout=5
+        )
+        print("OBS ReqClient connected", flush=True)
+
+    return _obs_req_client
+
+
+def obs_reset_client():
+    global _obs_req_client
+
+    if _obs_req_client is not None:
+        try:
+            _obs_req_client.disconnect()
+        except Exception:
+            pass
+
+    _obs_req_client = None
+
+
+class OBSClientProxy:
+    def __getattr__(self, name):
+        def call(*args, **kwargs):
+            global _obs_req_client
+
+            with _obs_req_lock:
+                try:
+                    client = _obs_connect()
+                    method = getattr(client, name)
+                    return method(*args, **kwargs)
+
+                except Exception as first_error:
+                    error_text = str(first_error)
+
+                    # OBS WebSocket request-level hatalari bağlantı
+                    # kopmasi değildir. Örneğin GetInputMute 604:
+                    # "The specified input does not support audio."
+                    #
+                    # Böyle durumlarda ReqClient'i kapatıp yeniden
+                    # bağlanmak yerine hatayı çağıran endpoint'e bırak.
+                    if (
+                        "returned code 604" in error_text
+                        or "does not support audio" in error_text
+                    ):
+                        raise
+
+                    # Diğer hatalar gerçek bağlantı problemi olabilir.
+                    # Bir kez reconnect edip isteği tekrar deniyoruz.
+                    print(
+                        f"OBS connection/request error ({name}), "
+                        f"reconnecting: {first_error}",
+                        flush=True
+                    )
+
+                    obs_reset_client()
+
+                    try:
+                        client = _obs_connect()
+                        method = getattr(client, name)
+                        return method(*args, **kwargs)
+
+                    except Exception:
+                        obs_reset_client()
+                        raise
+
+        return call
+
+
+_obs_proxy = OBSClientProxy()
+
+
+def obs_client():
+    return _obs_proxy
+
+
+@app.get("/api/obs/status")
+def obs_status():
+    try:
+        cl = obs_client()
+
+        version = cl.get_version()
+        stream = cl.get_stream_status()
+        scene = cl.get_current_program_scene()
+
+        return {
+            "connected": True,
+            "obs_version": getattr(version, "obs_version", ""),
+            "websocket_version": getattr(
+                version,
+                "obs_web_socket_version",
+                ""
+            ),
+            "streaming": getattr(stream, "output_active", False),
+            "stream_timecode": getattr(
+                stream,
+                "output_timecode",
+                "00:00:00"
+            ),
+            "current_scene": getattr(
+                scene,
+                "current_program_scene_name",
+                ""
+            )
+        }
+
+    except Exception as e:
+        return {
+            "connected": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/obs/scenes")
+def obs_scenes():
+    try:
+        cl = obs_client()
+        response = cl.get_scene_list()
+
+        return {
+            "current_scene":
+                response.current_program_scene_name,
+            "scenes": [
+                scene["sceneName"]
+                for scene in response.scenes
+            ]
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OBS sahneleri alınamadı: {e}"
+        )
+
+
+class OBSSceneRequest(BaseModel):
+    scene: str
+
+
+@app.post("/api/obs/scene")
+def obs_change_scene(req: OBSSceneRequest):
+    try:
+        cl = obs_client()
+
+        cl.set_current_program_scene(req.scene)
+
+        return {
+            "ok": True,
+            "scene": req.scene
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Sahne değiştirilemedi: {e}"
+        )
+
+
+@app.post("/api/obs/stream/start")
+def obs_stream_start():
+    try:
+        cl = obs_client()
+        cl.start_stream()
+
+        return {"ok": True}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Yayın başlatılamadı: {e}"
+        )
+
+
+@app.post("/api/obs/stream/stop")
+def obs_stream_stop():
+    try:
+        cl = obs_client()
+        cl.stop_stream()
+
+        return {"ok": True}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Yayın durdurulamadı: {e}"
+        )
+
+
+@app.get("/api/obs/audio")
+def obs_audio():
+    try:
+        cl = obs_client()
+
+        inputs = cl.get_input_list()
+
+        result = []
+
+        # Windows/OBS gerçek ses capture kaynakları.
+        # Audio desteklemeyen video/image vb. input'lara GetInputMute
+        # gönderilirse OBS 604 döndürüyor.
+        audio_input_kinds = {
+            "wasapi_input_capture",
+            "wasapi_output_capture",
+        }
+
+        for item in inputs.inputs:
+
+            name = item["inputName"]
+            kind = item.get("inputKind", "")
+
+            if kind not in audio_input_kinds:
+                continue
+
+            try:
+                mute = cl.get_input_mute(name)
+
+                result.append({
+                    "name": name,
+                    "kind": kind,
+                    "muted": mute.input_muted
+                })
+
+            except Exception:
+                # Tek bir ses kaynağındaki hata tüm endpoint'i bozmasın.
+                continue
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OBS ses kaynakları alınamadı: {e}"
+        )
+
+
+class OBSMuteRequest(BaseModel):
+    input: str
+    muted: bool
+
+
+@app.post("/api/obs/audio/mute")
+def obs_audio_mute(req: OBSMuteRequest):
+    try:
+        cl = obs_client()
+
+        cl.set_input_mute(
+            req.input,
+            req.muted
+        )
+
+        return {
+            "ok": True,
+            "input": req.input,
+            "muted": req.muted
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Ses durumu değiştirilemedi: {e}"
+        )
+
+
+@app.get("/api/obs/screenshot")
+def obs_screenshot():
+    try:
+        cl = obs_client()
+
+        scene = cl.get_current_program_scene()
+        scene_name = scene.current_program_scene_name
+
+        screenshot = cl.get_source_screenshot(
+            scene_name,
+            "jpg",
+            640,
+            360,
+            70
+        )
+
+        image_data = screenshot.image_data
+
+        # OBS:
+        # data:image/jpeg;base64,xxxxx
+        if "," in image_data:
+            image_data = image_data.split(",", 1)[1]
+
+        return {
+            "scene": scene_name,
+            "image":
+                "data:image/jpeg;base64,"
+                + image_data
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OBS görüntüsü alınamadı: {e}"
+        )
+# ---------------------------------------------------------
+# UBUNTU HOST MONITORING
+# ---------------------------------------------------------
+
+import shutil
+import time
+
+_host_net_previous = None
+_host_net_previous_time = None
+
+
+def read_host_cpu():
+    with open("/host/proc/stat", "r") as f:
+        values = f.readline().split()[1:]
+
+    values = [int(x) for x in values]
+
+    idle = values[3] + values[4]
+    total = sum(values)
+
+    time.sleep(0.15)
+
+    with open("/host/proc/stat", "r") as f:
+        values2 = [int(x) for x in f.readline().split()[1:]]
+
+    idle2 = values2[3] + values2[4]
+    total2 = sum(values2)
+
+    total_delta = total2 - total
+    idle_delta = idle2 - idle
+
+    if total_delta <= 0:
+        return 0
+
+    return round(
+        100 * (1 - idle_delta / total_delta),
+        1
+    )
+
+
+def read_host_memory():
+
+    info = {}
+
+    with open("/host/proc/meminfo", "r") as f:
+        for line in f:
+            key, value = line.split(":", 1)
+            info[key] = int(value.strip().split()[0])
+
+    total = info["MemTotal"] * 1024
+    available = info["MemAvailable"] * 1024
+    used = total - available
+
+    return {
+        "total": total,
+        "used": used,
+        "available": available,
+        "percent": round((used / total) * 100, 1)
+    }
+
+
+def read_host_network():
+
+    global _host_net_previous
+    global _host_net_previous_time
+
+    rx = 0
+    tx = 0
+
+    interfaces = []
+
+    with open("/host/proc/net/dev", "r") as f:
+
+        for line in f.readlines()[2:]:
+
+            interface, data = line.split(":", 1)
+            interface = interface.strip()
+
+            if interface == "lo":
+                continue
+
+            values = data.split()
+
+            interface_rx = int(values[0])
+            interface_tx = int(values[8])
+
+            rx += interface_rx
+            tx += interface_tx
+
+            interfaces.append({
+                "name": interface,
+                "rx": interface_rx,
+                "tx": interface_tx
+            })
+
+    now = time.time()
+
+    down_mbps = 0
+    up_mbps = 0
+
+    if _host_net_previous is not None:
+
+        elapsed = now - _host_net_previous_time
+
+        if elapsed > 0:
+
+            down_mbps = (
+                (rx - _host_net_previous["rx"])
+                * 8 / elapsed / 1_000_000
+            )
+
+            up_mbps = (
+                (tx - _host_net_previous["tx"])
+                * 8 / elapsed / 1_000_000
+            )
+
+    _host_net_previous = {
+        "rx": rx,
+        "tx": tx
+    }
+
+    _host_net_previous_time = now
+
+    return {
+        "down_mbps": round(max(0, down_mbps), 2),
+        "up_mbps": round(max(0, up_mbps), 2),
+        "rx_total": rx,
+        "tx_total": tx,
+        "interfaces": interfaces
+    }
+
+
+@app.get("/api/host/stats")
+def host_stats():
+
+    cpu = read_host_cpu()
+    memory = read_host_memory()
+
+    disk = shutil.disk_usage("/host/root")
+
+    network = read_host_network()
+
+    cpu_count = os.cpu_count()
+
+    return {
+
+        "hostname": "terminator",
+
+        "cpu": {
+            "percent": cpu,
+            "cores": cpu_count
+        },
+
+        "memory": {
+            "percent": memory["percent"],
+            "total_gb": round(memory["total"] / 1073741824, 2),
+            "used_gb": round(memory["used"] / 1073741824, 2),
+            "free_gb": round(memory["available"] / 1073741824, 2)
+        },
+
+        "disk": {
+            "percent": round(
+                disk.used / disk.total * 100,
+                1
+            ),
+
+            "total_gb": round(
+                disk.total / 1073741824,
+                2
+            ),
+
+            "used_gb": round(
+                disk.used / 1073741824,
+                2
+            ),
+
+            "free_gb": round(
+                disk.free / 1073741824,
+                2
+            )
+        },
+
+        "network": network
+    }
+# ---------------------------------------------------------
+# OBS LIVE AUDIO METERS
+# ---------------------------------------------------------
+
+obs_meter_clients = set()
+obs_meter_loop = None
+obs_meter_event_client = None
+obs_meter_lock = threading.Lock()
+obs_meter_watchdog_task = None
+
+# OBS'den en son gerçek InputVolumeMeters event'inin geldiği zaman.
+# monotonic kullanıyoruz; sistem saatindeki değişikliklerden etkilenmez.
+obs_meter_last_event = 0.0
+
+
+def mul_to_db(value):
+    try:
+        value = float(value)
+
+        if value <= 0:
+            return -60.0
+
+        return max(-60.0, min(0.0, 20.0 * math.log10(value)))
+
+    except Exception:
+        return -60.0
+
+
+def on_input_volume_meters(data):
+    global obs_meter_loop, obs_meter_last_event
+
+    # Callback'e ulaştıysak OBS gerçekten meter event'i gönderiyor.
+    obs_meter_last_event = time.monotonic()
+
+    try:
+        # obsws-python 1.8.0 callback bize class/type benzeri
+        # bir nesne veriyor; inputs doğrudan attribute olarak mevcut.
+        inputs = getattr(data, "inputs", [])
+
+        result = []
+
+        for item in inputs:
+
+            name = item.get("inputName", "")
+            levels = item.get("inputLevelsMul", [])
+
+            channels = []
+
+            for channel in levels:
+
+                if not channel:
+                    channels.append(-60.0)
+                    continue
+
+                # OBS her kanal için birkaç ölçüm gönderiyor.
+                # Canlı meter için en yüksek değeri kullan.
+                level = max(float(x or 0) for x in channel)
+
+                channels.append(round(mul_to_db(level), 1))
+
+            result.append({
+                "name": name,
+                "uuid": item.get("inputUuid", ""),
+                "channels": channels
+            })
+
+        if not obs_meter_loop:
+            return
+
+        payload = {
+            "type": "audio_meter",
+            "inputs": result
+        }
+
+        asyncio.run_coroutine_threadsafe(
+            broadcast_obs_meter(payload),
+            obs_meter_loop
+        )
+
+    except Exception as e:
+        print("OBS meter event error:", e)
+
+
+async def broadcast_obs_meter(payload):
+
+    dead = []
+
+    for websocket in list(obs_meter_clients):
+
+        try:
+            await websocket.send_json(payload)
+
+        except Exception:
+            dead.append(websocket)
+
+    for websocket in dead:
+        obs_meter_clients.discard(websocket)
+
+
+def stop_obs_meter_client():
+    global obs_meter_event_client
+
+    with obs_meter_lock:
+        client = obs_meter_event_client
+        obs_meter_event_client = None
+
+        if client is not None:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
+
+def start_obs_meter_client():
+    global obs_meter_event_client, obs_meter_last_event
+
+    with obs_meter_lock:
+        if obs_meter_event_client is not None:
+            return True
+
+        try:
+            client = obs.EventClient(
+                host=OBS_HOST,
+                port=OBS_PORT,
+                password=OBS_PASSWORD,
+                subs=Subs.INPUTVOLUMEMETERS
+            )
+
+            client.callback.register(on_input_volume_meters)
+
+            obs_meter_event_client = client
+
+            # Bağlantı yeni kuruldu. İlk event'in gelmesi için watchdog'a
+            # kısa bir süre tanıyoruz.
+            obs_meter_last_event = time.monotonic()
+
+            print(
+                "OBS audio meter EventClient connected",
+                flush=True
+            )
+
+            return True
+
+        except Exception as e:
+            obs_meter_event_client = None
+            obs_meter_last_event = 0.0
+
+            print(
+                "OBS audio meter connection error:",
+                repr(e),
+                flush=True
+            )
+
+            return False
+
+
+async def obs_meter_watchdog():
+    global obs_meter_event_client, obs_meter_last_event
+
+    while True:
+        await asyncio.sleep(3)
+
+        # Dashboard'da meter dinleyen kimse yoksa OBS'yi gereksiz yere
+        # reconnect etmiyoruz.
+        if not obs_meter_clients:
+            continue
+
+        with obs_meter_lock:
+            client_exists = obs_meter_event_client is not None
+
+        now = time.monotonic()
+
+        # EventClient hiç yoksa bağlantıyı kurmayı dene.
+        if not client_exists:
+            print(
+                "OBS audio meter client missing - reconnecting",
+                flush=True
+            )
+
+            await asyncio.to_thread(start_obs_meter_client)
+            continue
+
+        # Client yeni oluşturulduysa ilk event için zaman tanı.
+        if obs_meter_last_event <= 0:
+            continue
+
+        event_age = now - obs_meter_last_event
+
+        # InputVolumeMeters normalde sürekli gelir.
+        # 10 saniyedir hiç event gelmediyse bağlantıyı ölü kabul ediyoruz.
+        if event_age <= 10:
+            continue
+
+        print(
+            f"OBS audio meter stale ({event_age:.1f}s) - reconnecting",
+            flush=True
+        )
+
+        await asyncio.to_thread(stop_obs_meter_client)
+
+        # OBS yeni açılıyorsa çok agresif reconnect yapmayalım.
+        await asyncio.sleep(1)
+
+        await asyncio.to_thread(start_obs_meter_client)
+
+
+@app.websocket("/ws/obs/audio")
+async def websocket_obs_audio(websocket: WebSocket):
+
+    global obs_meter_loop, obs_meter_watchdog_task
+
+    await websocket.accept()
+
+    obs_meter_loop = asyncio.get_running_loop()
+
+    obs_meter_clients.add(websocket)
+
+    start_obs_meter_client()
+
+    if obs_meter_watchdog_task is None or obs_meter_watchdog_task.done():
+        obs_meter_watchdog_task = asyncio.create_task(
+            obs_meter_watchdog()
+        )
+
+    try:
+
+        while True:
+            # Browser bağlantısının açık olduğunu takip ediyoruz.
+            await websocket.receive_text()
+
+    except WebSocketDisconnect:
+        pass
+
+    except Exception:
+        pass
+
+    finally:
+        obs_meter_clients.discard(websocket)
+
+# ---------------------------------------------------------
+# YOUTUBE OAUTH / LIVE CHAT
+# ---------------------------------------------------------
+
+def youtube_client_config():
+    return {
+        "web": {
+            "client_id": YOUTUBE_CLIENT_ID,
+            "client_secret": YOUTUBE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [YOUTUBE_REDIRECT_URI],
+        }
+    }
+
+
+def youtube_load_credentials():
+    if not os.path.exists(YOUTUBE_TOKEN_FILE):
+        return None
+
+    try:
+        creds = Credentials.from_authorized_user_file(
+            YOUTUBE_TOKEN_FILE,
+            YOUTUBE_SCOPES
+        )
+
+        if creds.expired and creds.refresh_token:
+            creds.refresh(GoogleAuthRequest())
+
+            with open(YOUTUBE_TOKEN_FILE, "w") as f:
+                f.write(creds.to_json())
+
+        if not creds.valid:
+            return None
+
+        return creds
+
+    except Exception as e:
+        print("YouTube credentials error:", e, flush=True)
+        return None
+
+
+def youtube_service():
+    creds = youtube_load_credentials()
+
+    if not creds:
+        return None
+
+    return build(
+        "youtube",
+        "v3",
+        credentials=creds,
+        cache_discovery=False
+    )
+
+
+@app.get("/api/youtube/status")
+def youtube_status():
+    creds = youtube_load_credentials()
+
+    return {
+        "configured": bool(
+            YOUTUBE_CLIENT_ID
+            and YOUTUBE_CLIENT_SECRET
+            and YOUTUBE_REDIRECT_URI
+        ),
+        "authenticated": bool(creds)
+    }
+
+
+@app.get("/api/youtube/auth")
+def youtube_auth():
+    if not YOUTUBE_CLIENT_ID or not YOUTUBE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="YouTube OAuth yapılandırılmamış"
+        )
+
+    flow = Flow.from_client_config(
+        youtube_client_config(),
+        scopes=YOUTUBE_SCOPES,
+        autogenerate_code_verifier=False
+    )
+
+    flow.redirect_uri = YOUTUBE_REDIRECT_URI
+
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent"
+    )
+
+    return RedirectResponse(authorization_url)
+
+
+@app.get("/api/youtube/callback")
+def youtube_callback(code: str = Query(...)):
+    try:
+        flow = Flow.from_client_config(
+            youtube_client_config(),
+            scopes=YOUTUBE_SCOPES,
+        autogenerate_code_verifier=False
+        )
+
+        flow.redirect_uri = YOUTUBE_REDIRECT_URI
+        flow.fetch_token(code=code)
+
+        creds = flow.credentials
+
+        os.makedirs(
+            os.path.dirname(YOUTUBE_TOKEN_FILE),
+            exist_ok=True
+        )
+
+        with open(YOUTUBE_TOKEN_FILE, "w") as f:
+            f.write(creds.to_json())
+
+        return HTMLResponse("""
+        <!doctype html>
+        <html lang="tr">
+        <head>
+        <meta charset="utf-8">
+        <title>YouTube Bağlandı</title>
+        <style>
+        body{
+            background:#06111b;
+            color:#d8e5f2;
+            font-family:Arial,sans-serif;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            min-height:100vh;
+        }
+        .box{
+            background:#0b1c29;
+            border:1px solid #173149;
+            border-radius:18px;
+            padding:30px;
+            text-align:center;
+        }
+        h2{color:#22df82}
+        </style>
+        </head>
+        <body>
+        <div class="box">
+            <h2>✓ YouTube bağlandı</h2>
+            <p>Yetkilendirme tamamlandı.</p>
+            <p>Bu pencereyi kapatabilirsin.</p>
+        </div>
+        </body>
+        </html>
+        """)
+
+    except Exception as e:
+        print("YouTube OAuth callback error:", e, flush=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube OAuth hatası: {e}"
+        )
+
+@app.get("/api/youtube/live")
+def youtube_live():
+    try:
+        youtube = youtube_service()
+
+        if youtube is None:
+            raise HTTPException(
+                status_code=401,
+                detail="YouTube hesabı bağlı değil"
+            )
+
+        response = youtube.liveBroadcasts().list(
+            part="id,snippet,status",
+            broadcastType="all",
+            mine=True,
+            maxResults=5
+        ).execute()
+
+        items = [
+            item for item in response.get("items", [])
+            if item.get("status", {}).get("lifeCycleStatus") == "live"
+        ]
+
+        if not items:
+            return {
+                "live": False,
+                "message": "Aktif YouTube yayını bulunamadı"
+            }
+
+        broadcast = items[0]
+        snippet = broadcast.get("snippet", {})
+
+        return {
+            "live": True,
+            "broadcast_id": broadcast.get("id"),
+            "title": snippet.get("title", ""),
+            "live_chat_id": snippet.get("liveChatId"),
+            "published_at": snippet.get("publishedAt")
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("YouTube live error:", e, flush=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube canlı yayın hatası: {e}"
+        )
+
+
+@app.get("/api/youtube/chat")
+def youtube_chat(
+    live_chat_id: str | None = Query(default=None),
+    page_token: str | None = Query(default=None)
+):
+    try:
+        youtube = youtube_service()
+
+        if youtube is None:
+            raise HTTPException(
+                status_code=401,
+                detail="YouTube hesabı bağlı değil"
+            )
+
+        # live_chat_id verilmediyse aktif yayından otomatik bul.
+        if not live_chat_id:
+            broadcasts = youtube.liveBroadcasts().list(
+                part="id,snippet",
+                    broadcastType="all",
+                mine=True,
+                maxResults=5
+            ).execute()
+
+            items = [
+                item for item in broadcasts.get("items", [])
+                if item.get("status", {}).get("lifeCycleStatus") == "live"
+            ]
+
+            if not items:
+                return {
+                    "live": False,
+                    "messages": [],
+                    "message": "Aktif YouTube yayını bulunamadı"
+                }
+
+            live_chat_id = (
+                items[0]
+                .get("snippet", {})
+                .get("liveChatId")
+            )
+
+            if not live_chat_id:
+                return {
+                    "live": True,
+                    "chat_available": False,
+                    "messages": [],
+                    "message": "Canlı sohbet kullanılamıyor"
+                }
+
+        kwargs = {
+            "liveChatId": live_chat_id,
+            "part": "id,snippet,authorDetails",
+            "maxResults": 200
+        }
+
+        if page_token:
+            kwargs["pageToken"] = page_token
+
+        response = youtube.liveChatMessages().list(
+            **kwargs
+        ).execute()
+
+        messages = []
+
+        for item in response.get("items", []):
+            snippet = item.get("snippet", {})
+            author = item.get("authorDetails", {})
+
+            messages.append({
+                "id": item.get("id"),
+                "author": author.get("displayName", ""),
+                "author_channel_id": author.get(
+                    "channelId",
+                    ""
+                ),
+                "avatar": author.get(
+                    "profileImageUrl",
+                    ""
+                ),
+                "message": snippet.get(
+                    "displayMessage",
+                    ""
+                ),
+                "published_at": snippet.get(
+                    "publishedAt"
+                ),
+                "is_owner": author.get(
+                    "isChatOwner",
+                    False
+                ),
+                "is_moderator": author.get(
+                    "isChatModerator",
+                    False
+                ),
+                "is_member": author.get(
+                    "isChatSponsor",
+                    False
+                )
+            })
+
+        return {
+            "live": True,
+            "chat_available": True,
+            "live_chat_id": live_chat_id,
+            "polling_interval_ms": response.get(
+                "pollingIntervalMillis",
+                5000
+            ),
+            "next_page_token": response.get(
+                "nextPageToken"
+            ),
+            "messages": messages
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("YouTube chat error:", e, flush=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube sohbet hatası: {e}"
+        )
+
+# =========================================================
+# DASHBOARD SETTINGS
+# =========================================================
+
+SETTINGS_FILE = "/app/data/settings.json"
+_settings_lock = threading.RLock()
+
+DEFAULT_SETTINGS = {
+    "youtube": {
+        "client_id": "",
+        "client_secret": "",
+        "redirect_uri": ""
+    },
+    "kick": {
+        "channel": "golg3",
+        "channel_id": 27125816,
+        "chatroom_id": 26837501
+    },
+    "weather": {
+        "location": "",
+        "latitude": None,
+        "longitude": None
+    },
+    "obs": {
+        "host": "10.29.250.13",
+        "port": 4455,
+        "password": ""
+    },
+    "docker": {
+        "connection_type": "local",
+        "socket": "/var/run/docker.sock",
+        "host": ""
+    },
+    "host_monitor": {
+        "name": "terminator",
+        "proc_path": "/host/proc",
+        "root_path": "/host/root",
+        "network_interface": "auto"
+    },
+    "windows_monitor": {
+        "name": "",
+        "expected_hostname": "",
+        "agent_token": "",
+        "timeout": 15
+    }
+}
+
+
+def settings_deep_copy(value):
+    return json.loads(json.dumps(value))
+
+
+def settings_deep_merge(base, override):
+    result = settings_deep_copy(base)
+
+    if not isinstance(override, dict):
+        return result
+
+    for key, value in override.items():
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
+            result[key] = settings_deep_merge(
+                result[key],
+                value
+            )
+        else:
+            result[key] = value
+
+    return result
+
+
+def settings_load():
+    with _settings_lock:
+        if not os.path.exists(SETTINGS_FILE):
+            return settings_deep_copy(DEFAULT_SETTINGS)
+
+        try:
+            with open(
+                SETTINGS_FILE,
+                "r",
+                encoding="utf-8"
+            ) as f:
+                stored = json.load(f)
+
+            return settings_deep_merge(
+                DEFAULT_SETTINGS,
+                stored
+            )
+
+        except Exception as e:
+            print(
+                "Settings load error:",
+                e,
+                flush=True
+            )
+            return settings_deep_copy(DEFAULT_SETTINGS)
+
+
+def settings_save(settings):
+    with _settings_lock:
+        directory = os.path.dirname(SETTINGS_FILE)
+        os.makedirs(directory, exist_ok=True)
+
+        temp_file = SETTINGS_FILE + ".tmp"
+
+        with open(
+            temp_file,
+            "w",
+            encoding="utf-8"
+        ) as f:
+            json.dump(
+                settings,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(
+            temp_file,
+            SETTINGS_FILE
+        )
+
+
+def settings_public(settings):
+    public = settings_deep_copy(settings)
+
+    youtube = public.setdefault("youtube", {})
+    youtube_secret = youtube.pop(
+        "client_secret",
+        ""
+    )
+    youtube["client_secret_set"] = bool(
+        youtube_secret or YOUTUBE_CLIENT_SECRET
+    )
+
+    obs_cfg = public.setdefault("obs", {})
+    obs_password = obs_cfg.pop(
+        "password",
+        ""
+    )
+    obs_cfg["password_set"] = bool(
+        obs_password or os.getenv("OBS_PASSWORD", "")
+    )
+
+    windows = public.setdefault(
+        "windows_monitor",
+        {}
+    )
+    agent_token = windows.pop(
+        "agent_token",
+        ""
+    )
+    windows["agent_token_set"] = bool(
+        agent_token or TOKEN
+    )
+
+    return public
+
+
+def settings_clean_string(value, max_length=1024):
+    if value is None:
+        return ""
+
+    value = str(value).strip()
+
+    if len(value) > max_length:
+        raise HTTPException(
+            status_code=400,
+            detail="Ayar değeri çok uzun"
+        )
+
+    return value
+
+
+def settings_apply_update(current, incoming):
+    if not isinstance(incoming, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Geçersiz ayar verisi"
+        )
+
+    allowed_sections = {
+        "youtube",
+        "kick",
+        "weather",
+        "obs",
+        "docker",
+        "host_monitor",
+        "windows_monitor"
+    }
+
+    result = settings_deep_copy(current)
+
+    for section, values in incoming.items():
+        if section not in allowed_sections:
+            continue
+
+        if not isinstance(values, dict):
+            continue
+
+        result.setdefault(section, {})
+
+        for key, value in values.items():
+
+            # Frontend'e dönen durum alanlarını kaydetme.
+            if key.endswith("_set"):
+                continue
+
+            # Secret alanları boş gönderilirse
+            # mevcut secret korunur.
+            if (
+                section == "youtube"
+                and key == "client_secret"
+            ):
+                value = settings_clean_string(value)
+
+                if value:
+                    result[section][key] = value
+
+                continue
+
+            if (
+                section == "obs"
+                and key == "password"
+            ):
+                value = settings_clean_string(value)
+
+                if value:
+                    result[section][key] = value
+
+                continue
+
+            if (
+                section == "windows_monitor"
+                and key == "agent_token"
+            ):
+                value = settings_clean_string(value)
+
+                if value:
+                    result[section][key] = value
+
+                continue
+
+            result[section][key] = value
+
+    # Basit tip/range kontrolleri
+
+    try:
+        obs_port = int(
+            result["obs"].get("port", 4455)
+        )
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="OBS port geçersiz"
+        )
+
+    if not 1 <= obs_port <= 65535:
+        raise HTTPException(
+            status_code=400,
+            detail="OBS port 1-65535 arasında olmalı"
+        )
+
+    result["obs"]["port"] = obs_port
+
+    try:
+        timeout = int(
+            result["windows_monitor"].get(
+                "timeout",
+                15
+            )
+        )
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="Windows monitor timeout geçersiz"
+        )
+
+    if not 1 <= timeout <= 3600:
+        raise HTTPException(
+            status_code=400,
+            detail="Windows monitor timeout 1-3600 saniye arasında olmalı"
+        )
+
+    result["windows_monitor"]["timeout"] = timeout
+
+    return result
+
+
+@app.get("/api/settings")
+def get_dashboard_settings():
+    settings = settings_load()
+
+    return {
+        "ok": True,
+        "settings": settings_public(settings)
+    }
+
+
+@app.put("/api/settings")
+def update_dashboard_settings(payload: dict):
+    current = settings_load()
+
+    updated = settings_apply_update(
+        current,
+        payload
+    )
+
+    settings_save(updated)
+
+    return {
+        "ok": True,
+        "settings": settings_public(updated)
+    }
+
+# =========================================================
+# WEATHER LOCATION SEARCH
+# =========================================================
+
+@app.get("/api/settings/weather/search")
+def search_weather_location(q: str = Query(..., min_length=2)):
+    query = q.strip()
+
+    params = urlencode({
+        "name": query,
+        "count": 10,
+        "language": "tr",
+        "format": "json"
+    })
+
+    url = (
+        "https://geocoding-api.open-meteo.com/v1/search?"
+        + params
+    )
+
+    try:
+        req = Request(
+            url,
+            headers={
+                "User-Agent": "HomeDashboard/1.0"
+            }
+        )
+
+        with urlopen(req, timeout=10) as response:
+            raw = json.loads(
+                response.read().decode("utf-8")
+            )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Konum servisine ulaşılamadı: {e}"
+        )
+
+    results = []
+
+    for item in raw.get("results", []):
+        results.append({
+            "name": item.get("name", ""),
+            "admin1": item.get("admin1", ""),
+            "admin2": item.get("admin2", ""),
+            "country": item.get("country", ""),
+            "latitude": item.get("latitude"),
+            "longitude": item.get("longitude")
+        })
+
+    return {
+        "query": query,
+        "results": results
+    }

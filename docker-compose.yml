@@ -1,0 +1,25 @@
+services:
+  api:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      AGENT_TOKEN: "${AGENT_TOKEN}"
+      OBS_HOST: "10.29.250.13"
+      OBS_PORT: "4455"
+      OBS_PASSWORD: ""
+      YOUTUBE_CLIENT_ID: "${YOUTUBE_CLIENT_ID}"
+      YOUTUBE_CLIENT_SECRET: "${YOUTUBE_CLIENT_SECRET}"
+      YOUTUBE_REDIRECT_URI: "${YOUTUBE_REDIRECT_URI}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /:/host/root:ro
+      - ./youtube-data:/app/youtube-data
+      - ./data:/app/data
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    depends_on:
+      - api

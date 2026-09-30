@@ -1,0 +1,3286 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07131f">
+<link rel="manifest" href="/manifest.json">
+<title>Ev Dashboard</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#06111c;color:#e9f2ff;font:14px system-ui,Segoe UI,sans-serif}
+.app{max-width:760px;margin:auto;padding:14px 14px 85px}
+.head{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}
+.head h1{font-size:24px;margin:0}.online{color:#31e98a;font-size:13px}.offline{color:#ff6b6b;font-size:13px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.card{background:linear-gradient(145deg,#0c1d2d,#091725);border:1px solid #173149;border-radius:16px;padding:14px;box-shadow:0 8px 24px #0005}
+.metric{display:flex;align-items:center;gap:14px;min-height:150px}
+.ring{--p:25;--c:#2998ff;width:92px;height:92px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p)*1%),#16304d 0);display:grid;place-items:center;flex:none;position:relative}
+.ring:after{content:"";width:68px;height:68px;border-radius:50%;background:#0a1928;position:absolute}
+.ring span{z-index:1;font-size:24px;font-weight:800}.title{font-weight:800;font-size:16px;margin-bottom:8px}
+.details{line-height:1.9;color:#b9c9dc}.details b{color:white;float:right;margin-left:10px}.wide{grid-column:1/-1}
+.small{font-size:12px;color:#8fa5bb}.chartbox{position:relative;height:260px;min-height:260px;max-height:260px;overflow:hidden}
+.chartbox canvas{width:100%!important;height:100%!important;display:block}
+.temps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.temp{background:#0a1a29;border:1px solid #173149;border-radius:12px;padding:10px;text-align:center}.temp strong{font-size:21px}
+.bars .row{display:grid;grid-template-columns:90px 1fr 50px;gap:8px;align-items:center;margin:11px 0}
+.bar{height:10px;background:#142b42;border-radius:9px;overflow:hidden}.fill{height:100%;background:#2998ff;border-radius:9px}
+.page{display:none}.page.active{display:block}
+.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(760px,100%);height:68px;background:#081725ee;border-top:1px solid #173149;display:flex;justify-content:space-around;align-items:center;backdrop-filter:blur(12px);z-index:100}
+.nav div{text-align:center;color:#aabbd0;width:16.666%;padding:8px 2px;cursor:pointer;user-select:none}.nav .active{color:#36a8ff}
+.placeholder{padding:50px 20px;text-align:center;color:#8fa5bb}
+
+/* WEATHER */
+.weatherHero{position:relative;overflow:hidden;min-height:205px;padding:22px;background:radial-gradient(circle at 80% 20%,#2789ff55,transparent 42%),linear-gradient(145deg,#102a42,#091827)}
+.weatherLocation{color:#9eb4ca;font-size:13px}.weatherMain{display:flex;align-items:center;justify-content:space-between}
+.weatherTemperature{font-size:64px;line-height:1;font-weight:800;letter-spacing:-4px}.weatherIcon{font-size:72px;filter:drop-shadow(0 8px 15px #0005)}
+.weatherDescription{margin-top:8px;font-size:18px;font-weight:700}.weatherFeels{color:#9eb4ca;margin-top:4px}
+.weatherStats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.weatherStat{background:#0a1a29;border:1px solid #173149;border-radius:14px;padding:13px 8px;text-align:center}
+.weatherStat .wi{font-size:23px}.weatherStat .wv{font-size:18px;font-weight:800;margin-top:5px}.weatherStat .wl{color:#8fa5bb;font-size:11px;margin-top:2px}
+.hourlyScroll{display:flex;gap:8px;overflow-x:auto;padding:3px 0 7px;scrollbar-width:thin}
+.hourCard{flex:0 0 76px;background:#0a1a29;border:1px solid #173149;border-radius:13px;padding:10px 6px;text-align:center}
+.hourCard.now{border-color:#2998ff;background:#0d2439}.hourTime{font-size:12px;color:#a9bdd0}.hourIcon{font-size:25px;margin:7px 0}.hourTemp{font-size:17px;font-weight:800}.hourRain{color:#59baff;font-size:11px;margin-top:5px}
+.dailyRow{display:grid;grid-template-columns:90px 36px 1fr 80px;align-items:center;min-height:49px;border-bottom:1px solid #142b40}
+.dailyRow:last-child{border-bottom:0}.dailyDay{font-weight:700}.dailyIcon{font-size:22px}.dailyRain{color:#59baff;font-size:12px}.dailyTemp{text-align:right;font-weight:800}.dailyTemp span{color:#7890a8;margin-left:5px}
+
+/* DOCKER */
+.dockerSummary{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dockerSummaryCard{display:flex;align-items:center;gap:12px;min-height:82px}
+.dockerSummaryIcon{font-size:28px}.dockerSummaryValue{font-size:22px;font-weight:800}
+.dockerSectionTitle{display:flex;justify-content:space-between;align-items:center;margin:20px 3px 10px;font-size:17px;font-weight:800}
+.dockerHostInfo>div{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #142b40}.dockerHostInfo>div:last-child{border-bottom:0}.dockerHostInfo span{color:#8fa5bb}
+.containerCard{margin-bottom:10px}.containerHeader{display:flex;align-items:center;justify-content:space-between;gap:8px}.containerNameArea{min-width:0}
+.containerName{font-size:16px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.containerImage{color:#8198ad;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
+.containerState{flex:none;border-radius:20px;padding:5px 9px;font-size:11px;font-weight:700}.containerState.running{color:#36ef91;background:#153b2a;border:1px solid #236f49}.containerState.stopped{color:#ff7777;background:#3c1b22;border:1px solid #70303b}.containerState.paused{color:#ffc45b;background:#3d321b;border:1px solid #715c29}
+.containerMetrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:13px}.containerMetric{background:#081725;border:1px solid #142c42;border-radius:10px;padding:9px}.containerMetricLabel{color:#7890a8;font-size:10px}.containerMetricValue{font-weight:800;margin-top:3px}
+.containerBar{height:5px;background:#142b42;border-radius:5px;overflow:hidden;margin-top:6px}.containerBarFill{height:100%;background:#2998ff;border-radius:5px}.containerBarFill.ram{background:#9a4dff}
+.containerDetails{margin-top:12px;padding-top:10px;border-top:1px solid #142b40;display:grid;grid-template-columns:1fr 1fr;gap:7px 12px;font-size:11px}.containerDetails div{min-width:0}.containerDetails span{color:#7890a8;display:block}.containerDetails b{display:block;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.healthHealthy{color:#31e98a}.healthUnhealthy{color:#ff6666}.dockerError{color:#ff7777;text-align:center;padding:25px}
+
+@media(max-width:520px){
+.app{padding:10px 10px 82px}.card{padding:11px}.metric{min-height:132px}.ring{width:78px;height:78px}.ring:after{width:58px;height:58px}.ring span{font-size:20px}.temps{grid-template-columns:1fr 1fr}.details{font-size:12px}.head h1{font-size:21px}.weatherTemperature{font-size:55px}.weatherIcon{font-size:58px}.weatherStats{grid-template-columns:1fr 1fr}
+}
+
+/* OBS LIVE AUDIO METERS */
+.liveMeter{margin-top:9px;width:100%;padding-right:10px}
+.meterChannel{display:grid;grid-template-columns:12px 1fr 58px;gap:6px;align-items:center;margin-top:5px}
+.meterChannel>span{font-size:9px;color:#7890a8}
+.meterTrack{height:9px;border-radius:3px;overflow:hidden;position:relative;background:#173149}
+.meterFill{height:100%;width:0%;border-radius:3px;background:linear-gradient(90deg,#20d66b 0%,#20d66b 70%,#ffd42a 82%,#ff9d21 91%,#ff3c3c 100%);transition:width 70ms linear}
+.meterDb{font-size:9px;text-align:right;color:#9eb4ca;font-variant-numeric:tabular-nums}
+
+/* STREAM CHAT */
+.streamChatGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.streamChatCard{padding:0;overflow:hidden}
+.streamChatHeader{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #173149;background:#081722}
+.chatPlatform{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:7px;font-size:12px;font-weight:900;margin-right:5px}
+.chatPlatform.youtube{background:#ff0033;color:white}
+.chatPlatform.kick{background:#53fc18;color:#071006}
+.streamChatMessages{height:330px;overflow-y:auto;padding:10px 12px;scroll-behavior:smooth}
+.chatEmpty{height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:#7890a8;font-size:12px}
+.chatMessage{padding:7px 2px;border-bottom:1px solid #10273b;font-size:12px;line-height:1.4}
+.chatMessage:last-child{border-bottom:0}
+.chatAuthor{font-weight:800;margin-right:6px;color:#63b8ff}
+.chatText{color:#d8e5f2;overflow-wrap:anywhere}
+.chatTime{font-size:9px;color:#60798f;margin-right:6px}
+#youtubeChatStatus.chatOnline,#kickChatStatus.chatOnline{color:#22df82}
+#youtubeChatStatus.chatOffline,#kickChatStatus.chatOffline{color:#ff5964}
+@media(max-width:700px){
+ .streamChatGrid{grid-template-columns:1fr}
+ .streamChatMessages{height:300px}
+}
+
+
+/* SETTINGS */
+.settingsSection{margin-bottom:14px}
+.settingsSectionHeader{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
+.settingsSectionTitle{font-size:16px;font-weight:800}
+.settingsSectionSub{font-size:11px;color:#7890a8;margin-top:2px}
+.settingsGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.settingsField{min-width:0}
+.settingsField.full{grid-column:1/-1}
+.settingsField label{display:block;color:#8fa5bb;font-size:11px;margin:0 0 5px 2px}
+.settingsInput,.settingsSelect{
+ width:100%;
+ min-height:44px;
+ border:1px solid #1c3a55;
+ border-radius:11px;
+ background:#071725;
+ color:#e9f2ff;
+ padding:10px 12px;
+ font:inherit;
+ outline:none
+}
+.settingsInput:focus,.settingsSelect:focus{border-color:#2998ff;box-shadow:0 0 0 2px #2998ff22}
+.settingsInput::placeholder{color:#526b82}
+.settingsSecret{position:relative}
+.settingsSecret .settingsInput{padding-right:48px}
+.settingsEye{
+ position:absolute;
+ right:5px;
+ top:5px;
+ width:35px;
+ height:34px;
+ border:0;
+ border-radius:8px;
+ background:#10283d;
+ color:#9eb4ca;
+ cursor:pointer
+}
+.settingsStatus{font-size:11px;color:#7890a8;margin-top:7px}
+.settingsStatus.ok{color:#31e98a}
+.settingsStatus.warn{color:#ffc45b}
+.settingsStatus.error{color:#ff6b6b}
+.settingsReadonly{opacity:.65}
+.settingsActions{
+ position:sticky;
+ bottom:76px;
+ z-index:20;
+ display:grid;
+ grid-template-columns:1fr auto;
+ gap:9px;
+ margin-top:16px;
+ padding:10px;
+ border:1px solid #1a3852;
+ border-radius:15px;
+ background:#071725ee;
+ backdrop-filter:blur(12px)
+}
+.settingsSave{
+ border:1px solid #23784b;
+ background:#103522;
+ color:#fff;
+ border-radius:11px;
+ min-height:46px;
+ padding:10px 16px;
+ font-weight:800;
+ cursor:pointer
+}
+.settingsReload{
+ border:1px solid #24445f;
+ background:#0b2032;
+ color:#fff;
+ border-radius:11px;
+ min-height:46px;
+ padding:10px 15px;
+ font-weight:700;
+ cursor:pointer
+}
+.settingsSave:disabled,.settingsReload:disabled{opacity:.5;cursor:not-allowed}
+.settingsNotice{
+ margin-bottom:13px;
+ padding:11px 12px;
+ border:1px solid #21435f;
+ background:#0a1d2c;
+ border-radius:12px;
+ color:#9eb4ca;
+ font-size:11px;
+ line-height:1.5
+}
+.settingsModeInfo{
+ margin-top:8px;
+ padding:8px 10px;
+ border-radius:9px;
+ background:#071725;
+ color:#7890a8;
+ font-size:10px;
+ line-height:1.5
+}
+@media(max-width:520px){
+ .settingsGrid{grid-template-columns:1fr}
+ .settingsField.full{grid-column:auto}
+ .settingsActions{bottom:75px}
+}
+
+
+/* HOME SUMMARY */
+
+.homeSummaryGrid{
+ display:grid;
+ grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:12px;
+}
+
+.homeSummaryCard{
+ min-width:0;
+ cursor:pointer;
+ transition:transform .15s ease,border-color .15s ease;
+}
+
+.homeSummaryCard:active{
+ transform:scale(.98);
+}
+
+.homeSummaryHead{
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:8px;
+ margin-bottom:14px;
+}
+
+.homeSummaryTitle{
+ font-size:14px;
+ font-weight:800;
+ color:#e9f2ff;
+}
+
+.homeSummaryStatus{
+ font-size:9px;
+ color:#7890a8;
+ white-space:nowrap;
+}
+
+.homeSummaryStatus.online{
+ color:#22df82;
+}
+
+.homeSummaryStatus.offline{
+ color:#ff5964;
+}
+
+.homeSummaryMetrics{
+ display:grid;
+ grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:8px;
+}
+
+.homeSummaryMetrics>div,
+.homeSummaryInfo>div{
+ background:rgba(4,18,30,.55);
+ border:1px solid rgba(65,120,160,.15);
+ border-radius:9px;
+ padding:8px;
+ min-width:0;
+}
+
+.homeSummaryMetrics span,
+.homeSummaryInfo span{
+ display:block;
+ color:#7890a8;
+ font-size:9px;
+ margin-bottom:3px;
+}
+
+.homeSummaryMetrics b{
+ font-size:15px;
+ color:#e9f2ff;
+}
+
+.homeSummaryInfo{
+ display:grid;
+ grid-template-columns:1fr 1fr;
+ gap:8px;
+}
+
+.homeSummaryInfo b{
+ display:block;
+ color:#e9f2ff;
+ font-size:12px;
+ white-space:nowrap;
+ overflow:hidden;
+ text-overflow:ellipsis;
+}
+
+.homeWeatherCard{
+ grid-column:1/-1;
+}
+
+.homeWeatherMain{
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:15px;
+ margin-bottom:12px;
+}
+
+.homeWeatherLocation{
+ font-size:14px;
+ font-weight:700;
+ margin-bottom:4px;
+}
+
+.homeWeatherTemp{
+ font-size:38px;
+ line-height:1;
+ font-weight:800;
+ white-space:nowrap;
+}
+
+.homeSummaryArrow{
+ color:#7890a8;
+ font-size:25px;
+ line-height:1;
+}
+
+@media(max-width:390px){
+ .homeSummaryGrid{
+  gap:8px;
+ }
+
+ .homeSummaryCard{
+  padding:10px;
+ }
+
+ .homeSummaryTitle{
+  font-size:12px;
+ }
+
+ .homeSummaryMetrics{
+  gap:5px;
+ }
+
+ .homeSummaryMetrics>div,
+ .homeSummaryInfo>div{
+  padding:6px;
+ }
+
+ .homeSummaryMetrics b{
+  font-size:13px;
+ }
+}
+
+
+/* HOME OBS AUDIO */
+
+.homeObsAudioTitle{
+ margin-top:13px;
+ margin-bottom:7px;
+ font-size:10px;
+ font-weight:700;
+ color:#9eb4ca;
+}
+
+.homeObsAudioRow{
+ padding:9px 0;
+ border-top:1px solid rgba(65,120,160,.16);
+}
+
+.homeObsAudioHead{
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:8px;
+ margin-bottom:5px;
+}
+
+.homeObsAudioName{
+ min-width:0;
+ overflow:hidden;
+ text-overflow:ellipsis;
+ white-space:nowrap;
+ font-size:10px;
+ font-weight:700;
+ color:#e9f2ff;
+}
+
+.homeObsMute{
+ flex-shrink:0;
+ padding:5px 8px;
+ border-radius:7px;
+ border:1px solid #24445f;
+ background:#0b2032;
+ color:#fff;
+ font-size:9px;
+ cursor:pointer;
+}
+
+.homeObsMute.muted{
+ color:#ff8b91;
+ border-color:#5b3038;
+}
+
+.homeObsAudioRow .meterChannel{
+ grid-template-columns:10px 1fr 51px;
+ gap:4px;
+ margin-top:4px;
+}
+
+.homeObsAudioRow .meterTrack{
+ height:7px;
+}
+
+.homeObsAudioRow .meterDb{
+ font-size:8px;
+}
+
+
+/* HOME NETWORK BARS */
+
+.homeNet{
+ margin-top:12px;
+ padding-top:9px;
+ border-top:1px solid rgba(65,120,160,.16);
+}
+
+.homeNetTitle{
+ font-size:8px;
+ font-weight:800;
+ letter-spacing:1px;
+ color:#6f8ba3;
+ margin-bottom:6px;
+}
+
+.homeNetRow{
+ display:grid;
+ grid-template-columns:35px minmax(35px,1fr) 70px;
+ gap:6px;
+ align-items:center;
+ margin-top:5px;
+}
+
+.homeNetDir{
+ font-size:8px;
+ font-weight:700;
+ color:#9eb4ca;
+ white-space:nowrap;
+}
+
+.homeNetTrack{
+ height:7px;
+ overflow:hidden;
+ border-radius:4px;
+ background:#173149;
+}
+
+.homeNetFill{
+ width:0%;
+ height:100%;
+ border-radius:4px;
+ background:linear-gradient(90deg,#1ca8ff,#21e6a1);
+ transition:width .35s ease;
+}
+
+.homeNetRow b{
+ font-size:8px;
+ font-weight:700;
+ text-align:right;
+ color:#d9e8f5;
+ white-space:nowrap;
+ font-variant-numeric:tabular-nums;
+}
+
+@media(max-width:390px){
+ .homeNetRow{
+  grid-template-columns:32px minmax(25px,1fr) 63px;
+  gap:4px;
+ }
+
+ .homeNetRow b{
+  font-size:7px;
+ }
+}
+
+</style>
+</head>
+<body>
+<main class="app">
+
+<div id="page-home" class="page active">
+<header class="head">
+ <div>
+  <h1>⌂ Ana Sayfa</h1>
+  <div class="small">Home Dashboard</div>
+ </div>
+</header>
+
+<div class="homeSummaryGrid">
+
+ <div class="card homeSummaryCard" data-home-page="personalpc">
+  <div class="homeSummaryHead">
+   <div class="homeSummaryTitle">💻 Kişisel PC</div>
+   <div id="homePcStatus" class="homeSummaryStatus">● Bekleniyor</div>
+  </div>
+  <div class="homeSummaryMetrics">
+   <div><span>CPU</span><b id="homePcCpu">-</b></div>
+   <div><span>RAM</span><b id="homePcRam">-</b></div>
+   <div><span>GPU</span><b id="homePcGpu">-</b></div>
+   <div><span>GPU °C</span><b id="homePcTemp">-</b></div>
+  </div>
+  <div class="homeNet" id="homePcNetwork">
+   <div class="homeNetTitle">NETWORK</div>
+   <div class="homeNetRow">
+    <span class="homeNetDir">↓ IN</span>
+    <div class="homeNetTrack"><div id="homePcNetInBar" class="homeNetFill"></div></div>
+    <b id="homePcNetIn">0.00 Mbps</b>
+   </div>
+   <div class="homeNetRow">
+    <span class="homeNetDir">↑ OUT</span>
+    <div class="homeNetTrack"><div id="homePcNetOutBar" class="homeNetFill"></div></div>
+    <b id="homePcNetOut">0.00 Mbps</b>
+   </div>
+  </div>
+
+ </div>
+
+ <div class="card homeSummaryCard" data-home-page="pc">
+  <div class="homeSummaryHead">
+   <div class="homeSummaryTitle">🖥️ Host</div>
+   <div id="homeHostStatus" class="homeSummaryStatus">● Bekleniyor</div>
+  </div>
+  <div class="homeSummaryMetrics">
+   <div><span>CPU</span><b id="homeHostCpu">-</b></div>
+   <div><span>RAM</span><b id="homeHostRam">-</b></div>
+   <div><span>Disk</span><b id="homeHostDisk">-</b></div>
+  </div>
+  <div class="homeNet" id="homeHostNetwork">
+   <div class="homeNetTitle">NETWORK</div>
+   <div class="homeNetRow">
+    <span class="homeNetDir">↓ IN</span>
+    <div class="homeNetTrack"><div id="homeHostNetInBar" class="homeNetFill"></div></div>
+    <b id="homeHostNetIn">0.00 Mbps</b>
+   </div>
+   <div class="homeNetRow">
+    <span class="homeNetDir">↑ OUT</span>
+    <div class="homeNetTrack"><div id="homeHostNetOutBar" class="homeNetFill"></div></div>
+    <b id="homeHostNetOut">0.00 Mbps</b>
+   </div>
+  </div>
+
+ </div>
+
+ <div class="card homeSummaryCard" data-home-page="docker">
+  <div class="homeSummaryHead">
+   <div class="homeSummaryTitle">🐳 Docker</div>
+   <div id="homeDockerStatus" class="homeSummaryStatus">● Bekleniyor</div>
+  </div>
+  <div class="homeSummaryMetrics">
+   <div><span>Çalışan</span><b id="homeDockerRunning">-</b></div>
+   <div><span>Toplam</span><b id="homeDockerTotal">-</b></div>
+   <div><span>Images</span><b id="homeDockerImages">-</b></div>
+  </div>
+  <div class="homeNet" id="homeDockerNetwork">
+   <div class="homeNetTitle">NETWORK</div>
+   <div class="homeNetRow">
+    <span class="homeNetDir">↓ IN</span>
+    <div class="homeNetTrack"><div id="homeDockerNetInBar" class="homeNetFill"></div></div>
+    <b id="homeDockerNetIn">0.00 Mbps</b>
+   </div>
+   <div class="homeNetRow">
+    <span class="homeNetDir">↑ OUT</span>
+    <div class="homeNetTrack"><div id="homeDockerNetOutBar" class="homeNetFill"></div></div>
+    <b id="homeDockerNetOut">0.00 Mbps</b>
+   </div>
+  </div>
+
+ </div>
+
+ <div class="card homeSummaryCard" data-home-page="stream">
+  <div class="homeSummaryHead">
+   <div class="homeSummaryTitle">🎥 Yayın</div>
+   <div id="homeObsStatus" class="homeSummaryStatus">● Bekleniyor</div>
+  </div>
+  <div class="homeSummaryInfo">
+   <div><span>Yayın</span><b id="homeObsLive">-</b></div>
+   <div><span>Sahne</span><b id="homeObsScene">-</b></div>
+  </div>
+
+  <div class="homeObsAudioTitle">🔊 OBS Ses</div>
+
+  <div id="homeObsAudio">
+   <div class="small">Ses kaynakları bekleniyor...</div>
+  </div>
+ </div>
+
+ <div class="card homeSummaryCard homeWeatherCard" data-home-page="weather">
+  <div class="homeSummaryHead">
+   <div class="homeSummaryTitle">☁️ Hava</div>
+   <div class="homeSummaryArrow">›</div>
+  </div>
+
+  <div class="homeWeatherMain">
+   <div>
+    <div id="homeWeatherLocation" class="homeWeatherLocation">📍 -</div>
+    <div id="homeWeatherDescription" class="small">Yükleniyor...</div>
+   </div>
+
+   <div id="homeWeatherTemp" class="homeWeatherTemp">-°</div>
+  </div>
+
+  <div class="homeSummaryInfo homeWeatherInfo">
+   <div><span>Hissedilen</span><b id="homeWeatherFeels">-</b></div>
+   <div><span>Nem</span><b id="homeWeatherHumidity">-</b></div>
+  </div>
+ </div>
+
+</div>
+</div>
+
+<div id="page-personalpc" class="page">
+<header class="head"><div><h1>🖥️ Kişisel PC <span class="online" id="status">● Bekleniyor</span></h1><div class="small">Son güncelleme: <span id="time">-</span></div></div></header>
+<section class="grid" id="top"></section>
+<section class="grid" style="margin-top:12px">
+<div class="card wide"><div class="title">Kullanım Geçmişi</div><div class="chartbox"><canvas id="chart"></canvas></div></div>
+<div class="card wide"><div class="title">🌡️ Sıcaklıklar (°C)</div><div class="temps"><div class="temp">CPU<br><strong id="ct">-</strong></div><div class="temp">GPU<br><strong id="gt">-</strong></div><div class="temp">Disk<br><strong id="disk">-</strong></div><div class="temp">Ağ ↓<br><strong id="down">-</strong></div></div></div>
+<div class="card"><div class="title">💾 Disk</div><div class="bars"><div class="row"><span>C:</span><div class="bar"><div class="fill" id="db"></div></div><b id="dp">-</b></div></div></div>
+<div class="card"><div class="title">🌐 Ağ</div><div class="details">İndirme <b id="nd">-</b><br>Yükleme <b id="nu">-</b></div></div>
+<div class="card wide"><div class="title">ℹ️ Sistem Bilgileri</div><div class="details">Bilgisayar <b id="host">-</b><br>GPU <b id="gname">-</b><br>Çalışma süresi <b id="uptime">-</b></div></div>
+</section>
+</div>
+
+<div id="page-pc" class="page">
+<header class="head">
+ <div>
+  <h1>🖥️ Ubuntu Sunucu <span class="online" id="hostStatus">● Bekleniyor</span></h1>
+  <div class="small"><span id="hostName">terminator</span> • Son güncelleme: <span id="hostUpdated">-</span></div>
+ </div>
+</header>
+
+<section class="grid">
+
+ <div class="card metric">
+  <div>
+   <div class="title">CPU</div>
+   <div class="ring" id="hostCpuRing" style="--p:0;--c:#2998ff">
+    <span id="hostCpu">0%</span>
+   </div>
+  </div>
+  <div class="details">
+   Çekirdek <b id="hostCores">-</b><br>
+   Kullanım <b id="hostCpuText">-</b>
+  </div>
+ </div>
+
+ <div class="card metric">
+  <div>
+   <div class="title">RAM</div>
+   <div class="ring" id="hostRamRing" style="--p:0;--c:#9a4dff">
+    <span id="hostRam">0%</span>
+   </div>
+  </div>
+  <div class="details">
+   Kullanılan <b id="hostRamUsed">-</b><br>
+   Boş <b id="hostRamFree">-</b><br>
+   Toplam <b id="hostRamTotal">-</b>
+  </div>
+ </div>
+
+ <div class="card wide">
+  <div class="title">💾 Disk</div>
+
+  <div style="display:flex;justify-content:space-between;align-items:end;margin:10px 0">
+   <div>
+    <div class="small">Disk kullanımı</div>
+    <div style="font-size:30px;font-weight:800" id="hostDiskPercent">-%</div>
+   </div>
+   <div class="small" id="hostDiskText">-</div>
+  </div>
+
+  <div class="bar" style="height:14px">
+   <div class="fill" id="hostDiskBar" style="width:0%"></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">
+   <div class="temp">
+    Toplam<br>
+    <strong id="hostDiskTotal">-</strong>
+    <div class="small">GB</div>
+   </div>
+   <div class="temp">
+    Kullanılan<br>
+    <strong id="hostDiskUsed">-</strong>
+    <div class="small">GB</div>
+   </div>
+   <div class="temp">
+    Boş<br>
+    <strong id="hostDiskFree">-</strong>
+    <div class="small">GB</div>
+   </div>
+  </div>
+ </div>
+
+ <div class="card wide">
+  <div class="title">🌐 Network</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+
+   <div class="temp">
+    <div style="font-size:25px">⬇️</div>
+    <div class="small">DOWNLOAD</div>
+    <strong id="hostNetDown">0.00</strong>
+    <div class="small">Mbps</div>
+   </div>
+
+   <div class="temp">
+    <div style="font-size:25px">⬆️</div>
+    <div class="small">UPLOAD</div>
+    <strong id="hostNetUp">0.00</strong>
+    <div class="small">Mbps</div>
+   </div>
+
+  </div>
+
+  <div class="details" style="margin-top:15px">
+   Toplam Alınan <b id="hostRxTotal">-</b><br>
+   Toplam Gönderilen <b id="hostTxTotal">-</b>
+  </div>
+ </div>
+
+ <div class="card wide">
+  <div class="title">🔌 Ağ Arayüzleri</div>
+  <div id="hostInterfaces" class="details">Yükleniyor...</div>
+ </div>
+
+</section>
+</div>
+
+<div id="page-docker" class="page">
+<header class="head"><div><h1>🐳 Docker <span class="online" id="dockerStatus">● Bekleniyor</span></h1><div class="small"><span id="dockerHost">-</span> • Son güncelleme: <span id="dockerUpdated">-</span></div></div><div id="dockerRefresh" style="font-size:22px;cursor:pointer">⟳</div></header>
+<div class="dockerSummary">
+<div class="card dockerSummaryCard"><div class="dockerSummaryIcon">📦</div><div><div class="dockerSummaryValue" id="dockerContainerCount">-</div><div class="small">Container</div></div></div>
+<div class="card dockerSummaryCard"><div class="dockerSummaryIcon">🟢</div><div><div class="dockerSummaryValue" id="dockerRunning">-</div><div class="small">Çalışıyor</div></div></div>
+<div class="card dockerSummaryCard"><div class="dockerSummaryIcon">⏹️</div><div><div class="dockerSummaryValue" id="dockerStopped">-</div><div class="small">Durmuş</div></div></div>
+<div class="card dockerSummaryCard"><div class="dockerSummaryIcon">💾</div><div><div class="dockerSummaryValue" id="dockerHostRam">-</div><div class="small">Host RAM</div></div></div>
+</div>
+<div class="card" style="margin-top:12px"><div class="title">🖥️ Docker Host</div><div class="dockerHostInfo">
+<div><span>Docker</span><b id="dockerVersion">-</b></div><div><span>CPU</span><b id="dockerCpuCount">-</b></div><div><span>Images</span><b id="dockerImages">-</b></div><div><span>İşletim Sistemi</span><b id="dockerOS">-</b></div>
+</div></div>
+<div class="dockerSectionTitle"><span>Container'lar</span><span class="small" id="dockerContainerStatus">-</span></div>
+<div id="dockerContainers"><div class="card placeholder">Container bilgileri yükleniyor...</div></div>
+</div>
+
+<div id="page-stream" class="page">
+<header class="head">
+<div>
+<h1>🎥 Yayın <span class="online">● OBS</span></h1>
+<div class="small">OBS Studio yayın kontrolü</div>
+</div>
+</header>
+<div class="title" style="margin:18px 3px 9px">💬 Canlı Sohbet</div>
+<div class="streamChatGrid">
+
+<div class="card streamChatCard">
+  <div class="streamChatHeader">
+    <div><span class="chatPlatform youtube">▶</span> <b>YouTube</b></div>
+    <span id="youtubeChatStatus" class="small">● Bekleniyor</span>
+  </div>
+  <div id="youtubeChat" class="streamChatMessages">
+    <div class="chatEmpty">YouTube sohbeti bekleniyor...</div>
+  </div>
+</div>
+
+<div class="card streamChatCard">
+  <div class="streamChatHeader">
+    <div><span class="chatPlatform kick">K</span> <b>Kick</b></div>
+    <span id="kickChatStatus" class="small">● Bekleniyor</span>
+  </div>
+  <div id="kickChat" class="streamChatMessages">
+    <div class="chatEmpty">Kick sohbeti bekleniyor...</div>
+  </div>
+</div>
+
+</div>
+<div class="card">
+<div style="position:relative;background:#02070c;border-radius:14px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center">
+<img id="obsPreview" style="width:100%;height:100%;object-fit:contain;display:none">
+<div id="obsPreviewText" class="small">Önizleme bekleniyor...</div>
+<div style="position:absolute;left:10px;top:10px;background:#07131fdd;padding:6px 10px;border-radius:20px">
+<span id="obsLive">⚫ Yayın kapalı</span>
+</div>
+</div>
+
+<div style="display:flex;justify-content:space-between;margin-top:10px">
+<span class="small">Aktif sahne: <b id="obsCurrentScene">-</b></span>
+<span class="small" id="obsConnection">Bağlanıyor...</span>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+<button id="obsStart" style="padding:13px;border-radius:12px;border:1px solid #23784b;background:#103522;color:white;font-weight:800">🔴 Yayını Başlat</button>
+<button id="obsStop" style="padding:13px;border-radius:12px;border:1px solid #7d3039;background:#38191f;color:white;font-weight:800">⏹ Yayını Durdur</button>
+</div>
+</div>
+
+<div class="title" style="margin:18px 3px 9px">🎬 Sahneler</div>
+<div id="obsScenes" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+
+<div class="title" style="margin:18px 3px 9px">🔊 Ses Kaynakları</div>
+<div id="obsAudio" class="card">
+<div class="small">Ses kaynakları yükleniyor...</div>
+</div>
+
+</div>
+</div>
+
+<div id="page-weather" class="page">
+<header class="head"><div><h1>☁️ Hava Durumu</h1><div class="small" id="weatherUpdated">Son güncelleme: -</div></div><div id="weatherRefresh" style="font-size:22px;cursor:pointer">⟳</div></header>
+<div id="weatherContent"><div class="card placeholder">Hava durumu yükleniyor...</div></div>
+</div>
+
+<div id="page-settings" class="page">
+
+<header class="head">
+ <div>
+  <h1>⚙️ Ayarlar</h1>
+  <div class="small">Dashboard bağlantı ve servis ayarları</div>
+ </div>
+</header>
+
+<div class="settingsNotice">
+ Ayarlar dashboard sunucusunda kalıcı olarak saklanır.
+ Gizli değerler ekrana geri gönderilmez.
+</div>
+
+<div class="card settingsSection">
+ <div class="settingsSectionHeader">
+  <div>
+   <div class="settingsSectionTitle">▶ YouTube Chat</div>
+   <div class="settingsSectionSub">YouTube Data API ve OAuth</div>
+  </div>
+  <span id="settingsYoutubeStatus" class="settingsStatus">● Kontrol ediliyor</span>
+ </div>
+
+ <div class="settingsGrid">
+  <div class="settingsField full">
+   <label>Client ID</label>
+   <input id="settingsYoutubeClientId" class="settingsInput" autocomplete="off">
+  </div>
+
+  <div class="settingsField full">
+   <label>Client Secret</label>
+   <div class="settingsSecret">
+    <input id="settingsYoutubeSecret" class="settingsInput" type="password"
+           autocomplete="new-password" placeholder="Yeni secret girmek için yaz">
+    <button class="settingsEye" type="button" data-secret="settingsYoutubeSecret">👁</button>
+   </div>
+   <div id="settingsYoutubeSecretInfo" class="settingsStatus"></div>
+  </div>
+
+  <div class="settingsField full">
+   <label>Redirect URI</label>
+   <input id="settingsYoutubeRedirect" class="settingsInput" autocomplete="off">
+  </div>
+ </div>
+</div>
+
+
+<div class="card settingsSection">
+ <div class="settingsSectionHeader">
+  <div>
+   <div class="settingsSectionTitle">Kick Chat</div>
+   <div class="settingsSectionSub">Kick kanal ve chatroom bilgileri</div>
+  </div>
+ </div>
+
+ <div class="settingsGrid">
+  <div class="settingsField full">
+   <label>Kanal URL / Nick</label>
+   <input id="settingsKickChannel" class="settingsInput"
+          placeholder="golg3 veya https://kick.com/golg3">
+  </div>
+
+  <div class="settingsField">
+   <label>Channel ID</label>
+   <input id="settingsKickChannelId" class="settingsInput" inputmode="numeric">
+  </div>
+
+  <div class="settingsField">
+   <label>Chatroom ID</label>
+   <input id="settingsKickChatroomId" class="settingsInput" inputmode="numeric">
+  </div>
+ </div>
+</div>
+
+
+<div class="card settingsSection">
+ <div class="settingsSectionHeader">
+  <div>
+   <div class="settingsSectionTitle">☁️ Hava Durumu</div>
+   <div class="settingsSectionSub">Open-Meteo konumu</div>
+  </div>
+ </div>
+
+ <div class="settingsGrid">
+  <div class="settingsField full">
+   <label>İlçe / İl</label>
+   <div style="display:grid;grid-template-columns:1fr auto;gap:8px">
+    <input id="settingsWeatherLocation" class="settingsInput"
+           placeholder="Örn: Ümraniye, İstanbul">
+    <button id="settingsWeatherSearch" type="button"
+            class="settingsReload"
+            style="padding:0 14px">🔍 Bul</button>
+   </div>
+
+   <div id="settingsWeatherSearchStatus"
+        class="settingsStatus"></div>
+
+   <div id="settingsWeatherResults"
+        style="display:none;margin-top:8px"></div>
+  </div>
+
+  <div class="settingsField">
+   <label>Enlem</label>
+   <input id="settingsWeatherLat" class="settingsInput"
+          type="number" step="any">
+  </div>
+
+  <div class="settingsField">
+   <label>Boylam</label>
+   <input id="settingsWeatherLon" class="settingsInput"
+          type="number" step="any">
+  </div>
+ </div>
+</div>
+
+
+<div class="card settingsSection">
+ <div class="settingsSectionHeader">
+  <div>
+   <div class="settingsSectionTitle">🎥 OBS WebSocket</div>
+   <div class="settingsSectionSub">OBS Studio bağlantısı</div>
+  </div>
+ </div>
+
+ <div class="settingsGrid">
+  <div class="settingsField">
+   <label>IP / Host</label>
+   <input id="settingsObsHost" class="settingsInput">
+  </div>
+
+  <div class="settingsField">
+   <label>Port</label>
+   <input id="settingsObsPort" class="settingsInput"
+          type="number" min="1" max="65535">
+  </div>
+
+  <div class="settingsField full">
+   <label>WebSocket Şifresi</label>
+   <div class="settingsSecret">
+    <input id="settingsObsPassword" class="settingsInput"
+           type="password" autocomplete="new-password"
+           placeholder="Yeni şifre girmek için yaz">
+    <button class="settingsEye" type="button" data-secret="settingsObsPassword">👁</button>
+   </div>
+   <div id="settingsObsPasswordInfo" class="settingsStatus"></div>
+  </div>
+ </div>
+</div>
+
+
+<div class="card settingsSection">
+ <div class="settingsSectionHeader">
+  <div>
+   <div class="settingsSectionTitle">🐳 Docker</div>
+   <div class="settingsSectionSub">Docker Engine bağlantısı</div>
+  </div>
+ </div>
+
+ <div class="settingsGrid">
+  <div class="settingsField full">
+   <label>Bağlantı Tipi</label>
+   <select id="settingsDockerType" class="settingsSelect">
+    <option value="local">Local Socket</option>
+    <option value="remote">Remote Docker API</option>
+   </select>
+  </div>
+
+  <div class="settingsField full" id="settingsDockerSocketField">
+   <label>Docker Socket</label>
+   <input id="settingsDockerSocket" class="settingsInput">
+  </div>
+
+  <div class="settingsField full" id="settingsDockerHostField">
+   <label>Remote Host / URL</label>
+   <input id="settingsDockerHost" class="settingsInput"
+          placeholder="tcp://docker-host:2376">
+  </div>
+ </div>
+
+ <div class="settingsModeInfo">
+  Local Socket mevcut kurulum için önerilir. Remote Docker API kullanılacaksa TLS koruması kullanılmalıdır.
+ </div>
+</div>
+
+
+<div class="card settingsSection">
+ <div class="settingsSectionHeader">
+  <div>
+   <div class="settingsSectionTitle">🖥️ Docker Host Monitor</div>
+   <div class="settingsSectionSub">Ubuntu host performans izleme</div>
+  </div>
+ </div>
+
+ <div class="settingsGrid">
+  <div class="settingsField full">
+   <label>Sunucu Adı</label>
+   <input id="settingsHostName" class="settingsInput">
+  </div>
+
+  <div class="settingsField">
+   <label>Proc Path</label>
+   <input id="settingsHostProc" class="settingsInput">
+  </div>
+
+  <div class="settingsField">
+   <label>Root Path</label>
+   <input id="settingsHostRoot" class="settingsInput">
+  </div>
+
+  <div class="settingsField full">
+   <label>Network Interface</label>
+   <input id="settingsHostInterface" class="settingsInput"
+          placeholder="auto">
+  </div>
+ </div>
+</div>
+
+
+<div class="card settingsSection">
+ <div class="settingsSectionHeader">
+  <div>
+   <div class="settingsSectionTitle">💻 Windows PC Monitor</div>
+   <div class="settingsSectionSub">Windows performans agent ayarları</div>
+  </div>
+ </div>
+
+ <div class="settingsGrid">
+  <div class="settingsField">
+   <label>Görünen Ad</label>
+   <input id="settingsWindowsName" class="settingsInput">
+  </div>
+
+  <div class="settingsField">
+   <label>Beklenen Hostname</label>
+   <input id="settingsWindowsHostname" class="settingsInput">
+  </div>
+
+  <div class="settingsField full">
+   <label>Agent Token</label>
+   <div class="settingsSecret">
+    <input id="settingsWindowsToken" class="settingsInput"
+           type="password" autocomplete="new-password"
+           placeholder="Yeni token girmek için yaz">
+    <button class="settingsEye" type="button" data-secret="settingsWindowsToken">👁</button>
+   </div>
+   <div id="settingsWindowsTokenInfo" class="settingsStatus"></div>
+  </div>
+
+  <div class="settingsField full">
+   <label>Offline Timeout (saniye)</label>
+   <input id="settingsWindowsTimeout" class="settingsInput"
+          type="number" min="1" max="3600">
+  </div>
+ </div>
+
+ <div class="settingsModeInfo">
+  Mevcut mimaride Windows agent veriyi dashboard'a gönderir. PC IP adresi zorunlu değildir.
+ </div>
+</div>
+
+
+<div class="settingsActions">
+ <button id="settingsSave" class="settingsSave">💾 Ayarları Kaydet</button>
+ <button id="settingsReload" class="settingsReload">↻</button>
+</div>
+
+<div id="settingsMessage" class="settingsStatus"
+     style="text-align:center;margin:10px 0 20px"></div>
+
+</div>
+</main>
+
+<nav class="nav">
+<div class="active" data-page="home">⌂<br>Ana Sayfa</div>
+<div data-page="personalpc">💻<br>Kişisel PC</div>
+<div data-page="pc">🖥️<br>Host</div>
+<div data-page="docker">◫<br>Docker</div>
+<div data-page="stream">🎥<br>Yayın</div>
+<div data-page="weather">☁<br>Hava</div>
+<div data-page="settings">⚙<br>Ayarlar</div>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+let currentPage="home",chart=null,dockerTimer=null,weatherLoaded=false;
+const topProcesses=document.getElementById("top");
+const statusEl=document.getElementById("status"),timeEl=document.getElementById("time");
+
+document.querySelectorAll(".nav div").forEach(item=>item.addEventListener("click",()=>{
+ const page=item.dataset.page;
+
+ if(typeof startHomeSummary==="function"){
+  if(page==="home") startHomeSummary();
+  else stopHomeSummary();
+ }
+
+ document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+ document.querySelectorAll(".nav div").forEach(n=>n.classList.remove("active"));
+ document.getElementById("page-"+page).classList.add("active"); item.classList.add("active"); currentPage=page;
+ if(page==="docker") startDockerMonitoring(); else stopDockerMonitoring();
+ if(page==="pc") startHostMonitoring(); else stopHostMonitoring();
+ if(page==="weather") loadWeather();
+ if(page==="personalpc"){
+  if(chart)setTimeout(()=>chart.resize(),50);
+  else setTimeout(()=>draw(),50);
+ }
+}));
+
+function card(name,p,color,sub,lines){p=Number(p||0);return `<div class="card metric"><div><div class="title">${name}</div><div class="ring" style="--p:${p};--c:${color}"><span>${Math.round(p)}%</span></div><div class="small">${sub||""}</div></div><div class="details">${lines}</div></div>`}
+async function refresh(){
+ try{
+  const r=await fetch("/api/metrics",{cache:"no-store"}),d=await r.json(); if(!d.hostname)return;
+  statusEl.textContent="● Çevrimiçi"; statusEl.className="online"; timeEl.textContent=new Date(d.timestamp).toLocaleTimeString("tr-TR");
+  topProcesses.innerHTML=card("CPU",d.cpu,"#2998ff","",`Sıcaklık <b>${d.cpu_temp??"-"} °C</b>`)+card("RAM",d.ram,"#9a4dff",`${Number(d.ram_used_gb).toFixed(1)} / ${Number(d.ram_total_gb).toFixed(1)} GB`,`Kullanılan <b>${Number(d.ram_used_gb).toFixed(1)} GB</b><br>Boş <b>${(Number(d.ram_total_gb)-Number(d.ram_used_gb)).toFixed(1)} GB</b>`)+card("GPU",d.gpu,"#22df82",d.gpu_name||"",`Sıcaklık <b>${d.gpu_temp??"-"} °C</b>`)+card("VRAM",d.vram,"#ff9418",`${Number(d.vram_used_gb).toFixed(1)} / ${Number(d.vram_total_gb).toFixed(1)} GB`,`Kullanılan <b>${Number(d.vram_used_gb).toFixed(1)} GB</b>`);
+  document.getElementById("ct").textContent=(d.cpu_temp??"-")+"°";document.getElementById("gt").textContent=(d.gpu_temp??"-")+"°";document.getElementById("disk").textContent=Math.round(d.disk_percent)+"%";document.getElementById("down").textContent=Number(d.net_down_mbps).toFixed(1);document.getElementById("dp").textContent=Math.round(d.disk_percent)+"%";document.getElementById("db").style.width=d.disk_percent+"%";document.getElementById("nd").textContent=Number(d.net_down_mbps).toFixed(1)+" Mbps";document.getElementById("nu").textContent=Number(d.net_up_mbps).toFixed(1)+" Mbps";document.getElementById("host").textContent=d.hostname;document.getElementById("gname").textContent=d.gpu_name||"-";document.getElementById("uptime").textContent=d.uptime||"-";
+  if(currentPage==="personalpc")draw();
+ }catch(e){statusEl.textContent="● Çevrimdışı";statusEl.className="offline"}
+}
+async function draw(){
+ try{
+  const h=await(await fetch("/api/history",{cache:"no-store"})).json(),last=h.slice(-60);
+  const labels=last.map(x=>new Date(x.timestamp).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}));
+  const sets=[["CPU",last.map(x=>x.cpu),"#2998ff"],["GPU",last.map(x=>x.gpu),"#22df82"],["RAM",last.map(x=>x.ram),"#9a4dff"]].map(x=>({label:x[0],data:x[1],borderColor:x[2],tension:.3,pointRadius:0}));
+  if(chart){chart.data.labels=labels;chart.data.datasets=sets;chart.update("none");return}
+  chart=new Chart(document.getElementById("chart"),{type:"line",data:{labels,datasets:sets},options:{responsive:true,maintainAspectRatio:false,animation:false,scales:{x:{ticks:{color:"#7890a8"},grid:{color:"#10273b"}},y:{min:0,max:100,ticks:{color:"#7890a8"},grid:{color:"#10273b"}}},plugins:{legend:{labels:{color:"#b9c9dc"}}}}});
+ }catch(e){console.error("Grafik:",e)}
+}
+
+/* Docker */
+function stateClass(s){return s==="running"?"running":s==="paused"?"paused":"stopped"}
+function stateText(s){return s==="running"?"● Running":s==="paused"?"● Paused":s==="exited"?"● Exited":"● "+(s||"Unknown")}
+function healthText(h){if(!h)return"-";if(h==="healthy")return'<span class="healthHealthy">● Healthy</span>';if(h==="unhealthy")return'<span class="healthUnhealthy">● Unhealthy</span>';return h}
+function ips(v){return v?.length?v.map(x=>x.ip).filter(Boolean).join(", "):"-"}
+function ports(v){return v?.length?[...new Set(v)].join(", "):"-"}
+function containerHTML(c){
+ const cpu=Number(c.cpu||0),ram=Number(c.memory_percent||0),ip=ips(c.ips),port=ports(c.ports);
+ return `<div class="card containerCard"><div class="containerHeader"><div class="containerNameArea"><div class="containerName">🐳 ${c.name}</div><div class="containerImage">${c.image}</div></div><div class="containerState ${stateClass(c.state)}">${stateText(c.state)}</div></div><div class="containerMetrics"><div class="containerMetric"><div class="containerMetricLabel">CPU</div><div class="containerMetricValue">${cpu.toFixed(2)}%</div><div class="containerBar"><div class="containerBarFill" style="width:${Math.min(Math.max(cpu,0),100)}%"></div></div></div><div class="containerMetric"><div class="containerMetricLabel">RAM</div><div class="containerMetricValue">${c.memory_usage_text}</div><div class="containerBar"><div class="containerBarFill ram" style="width:${Math.min(Math.max(ram,0),100)}%"></div></div></div><div class="containerMetric"><div class="containerMetricLabel">Ağ ↓</div><div class="containerMetricValue">${c.network_rx_text}</div></div><div class="containerMetric"><div class="containerMetricLabel">Ağ ↑</div><div class="containerMetricValue">${c.network_tx_text}</div></div></div><div class="containerDetails"><div><span>Durum</span><b>${c.status||"-"}</b></div><div><span>Health</span><b>${healthText(c.health)}</b></div><div><span>IP</span><b title="${ip}">${ip}</b></div><div><span>Port</span><b title="${port}">${port}</b></div></div></div>`
+}
+async function loadDocker(){
+ if(currentPage!=="docker")return;
+ try{
+  const [sr,cr]=await Promise.all([fetch("/api/docker/summary",{cache:"no-store"}),fetch("/api/docker/containers",{cache:"no-store"})]);if(!sr.ok||!cr.ok)throw new Error("Docker API");
+  const s=await sr.json(),cs=await cr.json();
+  const ds=document.getElementById("dockerStatus");ds.textContent="● Çevrimiçi";ds.className="online";
+  document.getElementById("dockerHost").textContent=s.name||"-";document.getElementById("dockerUpdated").textContent=new Date().toLocaleTimeString("tr-TR");document.getElementById("dockerContainerCount").textContent=s.containers??"-";document.getElementById("dockerRunning").textContent=s.running??"-";document.getElementById("dockerStopped").textContent=s.stopped??"-";document.getElementById("dockerHostRam").textContent=s.memory_text||"-";document.getElementById("dockerVersion").textContent=s.docker_version||"-";document.getElementById("dockerCpuCount").textContent=(s.cpus??"-")+" CPU";document.getElementById("dockerImages").textContent=s.images??"-";document.getElementById("dockerOS").textContent=s.os||"-";document.getElementById("dockerContainerStatus").textContent=`${s.running??0} çalışıyor / ${s.containers??0} toplam`;document.getElementById("dockerContainers").innerHTML=cs.length?cs.map(containerHTML).join(""):'<div class="card placeholder">Container bulunamadı.</div>';
+ }catch(e){const ds=document.getElementById("dockerStatus");ds.textContent="● Çevrimdışı";ds.className="offline";document.getElementById("dockerContainers").innerHTML='<div class="card dockerError">Docker bilgileri alınamadı.</div>'}
+}
+function startDockerMonitoring(){stopDockerMonitoring();loadDocker();dockerTimer=setInterval(loadDocker,5000)}
+function stopDockerMonitoring(){if(dockerTimer){clearInterval(dockerTimer);dockerTimer=null}}
+document.getElementById("dockerRefresh").addEventListener("click",loadDocker);
+
+/* Weather - mevcut backend /api/weather endpointini kullanır */
+function dayName(d,i){if(i===0)return"Bugün";if(i===1)return"Yarın";return new Date(d+"T12:00:00").toLocaleDateString("tr-TR",{weekday:"long"})}
+function hourText(t){return new Date(t).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})}
+async function loadWeather(force=false){
+ if(weatherLoaded&&!force)return;
+ const el=document.getElementById("weatherContent");el.innerHTML='<div class="card placeholder">Hava durumu yükleniyor...</div>';
+ try{
+  const sr=await fetch("/api/settings",{cache:"no-store"});
+  if(!sr.ok)throw new Error("Settings API");
+
+  const sd=await sr.json();
+  const w=sd.settings?.weather || {};
+
+  if(w.latitude==null || w.longitude==null)
+   throw new Error("Hava durumu konumu ayarlanmamış");
+
+  const p=new URLSearchParams({
+   lat:String(w.latitude),
+   lon:String(w.longitude),
+   name:w.location || "Seçili konum"
+  });
+
+  const r=await fetch("/api/weather?"+p,{cache:"no-store"});
+  if(!r.ok)throw new Error("Weather API");
+  const d=await r.json(),c=d.current,now=new Date(),hours=d.hourly.filter(h=>new Date(h.time)>=new Date(now.getTime()-3600000)).slice(0,24);
+  const hh=hours.map((h,i)=>`<div class="hourCard ${i===0?"now":""}"><div class="hourTime">${i===0?"Şimdi":hourText(h.time)}</div><div class="hourIcon">${h.icon}</div><div class="hourTemp">${Math.round(h.temperature)}°</div><div class="hourRain">💧 ${h.precipitation_probability??0}%</div></div>`).join("");
+  const dd=d.daily.map((x,i)=>`<div class="dailyRow"><div class="dailyDay">${dayName(x.date,i)}</div><div class="dailyIcon">${x.icon}</div><div class="dailyRain">💧 ${x.precipitation_probability??0}%</div><div class="dailyTemp">${Math.round(x.max)}° <span>${Math.round(x.min)}°</span></div></div>`).join("");
+  el.innerHTML=`<div class="card weatherHero"><div class="weatherLocation">📍 ${d.location.name}</div><div class="weatherMain"><div><div class="weatherTemperature">${Math.round(c.temperature)}°</div><div class="weatherDescription">${c.description}</div><div class="weatherFeels">Hissedilen ${Math.round(c.apparent_temperature)}°</div></div><div class="weatherIcon">${c.icon}</div></div></div><div class="weatherStats"><div class="weatherStat"><div class="wi">💧</div><div class="wv">${c.humidity}%</div><div class="wl">Nem</div></div><div class="weatherStat"><div class="wi">💨</div><div class="wv">${Math.round(c.wind_speed)} km/h</div><div class="wl">Rüzgâr</div></div><div class="weatherStat"><div class="wi">🌧️</div><div class="wv">${c.precipitation} mm</div><div class="wl">Yağış</div></div><div class="weatherStat"><div class="wi">🔵</div><div class="wv">${Math.round(c.pressure)}</div><div class="wl">hPa</div></div></div><div class="card" style="margin-top:12px"><div class="title">🕐 Saatlik Tahmin</div><div class="hourlyScroll">${hh}</div></div><div class="card" style="margin-top:12px"><div class="title">📅 7 Günlük Tahmin</div>${dd}</div>`;
+  weatherLoaded=true;document.getElementById("weatherUpdated").textContent="Son güncelleme: "+new Date().toLocaleTimeString("tr-TR");
+ }catch(e){el.innerHTML='<div class="card dockerError">Hava durumu alınamadı.</div>'}
+}
+document.getElementById("weatherRefresh").addEventListener("click",()=>loadWeather(true));
+
+refresh();setInterval(refresh,3000);
+if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js");
+</script>
+
+<script>
+let obsPreviewTimer=null;
+let obsStatusTimer=null;
+
+function obsEsc(v){
+ return String(v ?? "").replace(/[&<>"']/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+ });
+}
+
+async function obsPost(url, body){
+ const options={method:"POST",headers:{}};
+
+ if(body !== undefined){
+  options.headers["Content-Type"]="application/json";
+  options.body=JSON.stringify(body);
+ }
+
+ const r=await fetch(url,options);
+
+ if(!r.ok){
+  let message=r.statusText;
+  try{
+   const d=await r.json();
+   message=d.detail || message;
+  }catch(e){}
+  throw new Error(message);
+ }
+
+ return await r.json();
+}
+
+async function loadObsStatus(){
+ try{
+  const r=await fetch("/api/obs/status",{cache:"no-store"});
+  const d=await r.json();
+
+  if(!d.connected) throw new Error(d.error || "OBS bağlantısı yok");
+
+  document.getElementById("obsConnection").textContent="🟢 OBS bağlı";
+  document.getElementById("obsCurrentScene").textContent=d.current_scene || "-";
+
+  if(d.streaming){
+   document.getElementById("obsLive").textContent="🔴 CANLI";
+   document.getElementById("obsStart").disabled=true;
+   document.getElementById("obsStop").disabled=false;
+  }else{
+   document.getElementById("obsLive").textContent="⚫ Yayın kapalı";
+   document.getElementById("obsStart").disabled=false;
+   document.getElementById("obsStop").disabled=true;
+  }
+
+ }catch(e){
+  document.getElementById("obsConnection").textContent="🔴 OBS bağlantısı yok";
+ }
+}
+
+async function loadObsScenes(){
+ try{
+  const r=await fetch("/api/obs/scenes",{cache:"no-store"});
+  if(!r.ok) throw new Error();
+
+  const d=await r.json();
+  const el=document.getElementById("obsScenes");
+
+  el.innerHTML=(d.scenes || []).map(function(scene){
+   return '<button class="obsSceneButton" data-scene="'+obsEsc(scene)+'" style="padding:12px;border-radius:12px;border:1px solid #24445f;background:#0b2032;color:white;font-weight:700">'+obsEsc(scene)+'</button>';
+  }).join("");
+
+  el.querySelectorAll(".obsSceneButton").forEach(function(btn){
+   btn.addEventListener("click",async function(){
+    try{
+     await obsPost("/api/obs/scene",{scene:btn.dataset.scene});
+     await loadObsStatus();
+     await loadObsScenes();
+     await loadObsPreview();
+    }catch(e){
+     alert("Sahne değiştirilemedi: "+e.message);
+    }
+   });
+  });
+
+ }catch(e){
+  document.getElementById("obsScenes").innerHTML='<div class="small">Sahneler alınamadı.</div>';
+ }
+}
+
+async function loadObsAudio(){
+ try{
+  const r=await fetch("/api/obs/audio",{cache:"no-store"});
+  if(!r.ok) throw new Error();
+
+  const data=await r.json();
+  const el=document.getElementById("obsAudio");
+
+  if(!data.length){
+   el.innerHTML='<div class="small">Ses kaynağı bulunamadı.</div>';
+   return;
+  }
+
+  el.innerHTML=data.map(function(a){
+   return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #173149">'+
+    '<div style="flex:1;min-width:0"><b>'+obsEsc(a.name)+'</b><div class="liveMeter" data-meter="'+obsEsc(a.name)+'"><div class="meterChannel"><span>L</span><div class="meterTrack"><div class="meterFill"></div></div><b class="meterDb">-60.0 dB</b></div><div class="meterChannel meterRight"><span>R</span><div class="meterTrack"><div class="meterFill"></div></div><b class="meterDb">-60.0 dB</b></div></div></div>'+
+
+    '<button class="obsMute" data-input="'+obsEsc(a.name)+'" data-muted="'+(a.muted?"1":"0")+'" style="padding:9px 12px;border-radius:10px;border:1px solid #24445f;background:#0b2032;color:white">'+
+    (a.muted ? "🔇 Sessiz" : "🔊 Açık")+
+    '</button></div>';
+  }).join("");
+
+  el.querySelectorAll(".obsMute").forEach(function(btn){
+   btn.addEventListener("click",async function(){
+    const currentlyMuted=btn.dataset.muted==="1";
+
+    try{
+     await obsPost("/api/obs/audio/mute",{
+      input:btn.dataset.input,
+      muted:!currentlyMuted
+     });
+     await loadObsAudio();
+    }catch(e){
+     alert("Ses değiştirilemedi: "+e.message);
+    }
+   });
+  });
+
+ }catch(e){
+  document.getElementById("obsAudio").innerHTML='<div class="small">Ses kaynakları alınamadı.</div>';
+ }
+}
+
+async function loadObsPreview(){
+ try{
+  const r=await fetch("/api/obs/screenshot",{cache:"no-store"});
+  if(!r.ok) throw new Error();
+
+  const d=await r.json();
+  const img=document.getElementById("obsPreview");
+
+  img.src=d.image;
+  img.style.display="block";
+  document.getElementById("obsPreviewText").style.display="none";
+
+ }catch(e){
+  document.getElementById("obsPreviewText").textContent="Önizleme alınamadı";
+ }
+}
+
+document.getElementById("obsStart").addEventListener("click",async function(){
+ if(!confirm("Canlı yayını başlatmak istiyor musun?")) return;
+
+ try{
+  await obsPost("/api/obs/stream/start");
+  await loadObsStatus();
+ }catch(e){
+  alert("Yayın başlatılamadı: "+e.message);
+ }
+});
+
+document.getElementById("obsStop").addEventListener("click",async function(){
+ if(!confirm("Canlı yayını durdurmak istiyor musun?")) return;
+
+ try{
+  await obsPost("/api/obs/stream/stop");
+  await loadObsStatus();
+ }catch(e){
+  alert("Yayın durdurulamadı: "+e.message);
+ }
+});
+
+async function startObsUI(){
+ await Promise.all([
+  loadObsStatus(),
+  loadObsScenes(),
+  loadObsAudio()
+ ]);
+
+ await loadObsPreview();
+
+ if(!obsStatusTimer)
+  obsStatusTimer=setInterval(loadObsStatus,2000);
+
+ if(!obsPreviewTimer)
+  obsPreviewTimer=setInterval(loadObsPreview,1000);
+}
+
+startObsUI();
+</script>
+
+
+<script>
+let hostTimer=null;
+
+function hostBytes(v){
+ v=Number(v||0);
+ const units=["B","KB","MB","GB","TB"];
+ let i=0;
+ while(v>=1024 && i<units.length-1){
+  v/=1024;
+  i++;
+ }
+ return v.toFixed(i>=3?1:0)+" "+units[i];
+}
+
+async function loadHostStats(){
+
+ if(currentPage!=="pc") return;
+
+ try{
+
+  const r=await fetch("/api/host/stats",{cache:"no-store"});
+
+  if(!r.ok)
+   throw new Error("Host API");
+
+  const d=await r.json();
+
+  const cpu=Number(d.cpu.percent||0);
+  const ram=Number(d.memory.percent||0);
+  const disk=Number(d.disk.percent||0);
+
+  const status=document.getElementById("hostStatus");
+  status.textContent="● Çevrimiçi";
+  status.className="online";
+
+  document.getElementById("hostName").textContent=d.hostname||"terminator";
+  document.getElementById("hostUpdated").textContent=
+   new Date().toLocaleTimeString("tr-TR");
+
+  document.getElementById("hostCpu").textContent=
+   cpu.toFixed(1)+"%";
+
+  document.getElementById("hostCpuText").textContent=
+   cpu.toFixed(1)+"%";
+
+  document.getElementById("hostCores").textContent=
+   d.cpu.cores;
+
+  document.getElementById("hostCpuRing")
+   .style.setProperty("--p",cpu);
+
+
+  document.getElementById("hostRam").textContent=
+   ram.toFixed(1)+"%";
+
+  document.getElementById("hostRamUsed").textContent=
+   Number(d.memory.used_gb).toFixed(1)+" GB";
+
+  document.getElementById("hostRamFree").textContent=
+   Number(d.memory.free_gb).toFixed(1)+" GB";
+
+  document.getElementById("hostRamTotal").textContent=
+   Number(d.memory.total_gb).toFixed(1)+" GB";
+
+  document.getElementById("hostRamRing")
+   .style.setProperty("--p",ram);
+
+
+  document.getElementById("hostDiskPercent").textContent=
+   disk.toFixed(1)+"%";
+
+  document.getElementById("hostDiskBar").style.width=
+   Math.min(disk,100)+"%";
+
+  document.getElementById("hostDiskTotal").textContent=
+   Number(d.disk.total_gb).toFixed(1);
+
+  document.getElementById("hostDiskUsed").textContent=
+   Number(d.disk.used_gb).toFixed(1);
+
+  document.getElementById("hostDiskFree").textContent=
+   Number(d.disk.free_gb).toFixed(1);
+
+  document.getElementById("hostDiskText").textContent=
+   Number(d.disk.used_gb).toFixed(1)+
+   " / "+
+   Number(d.disk.total_gb).toFixed(1)+
+   " GB";
+
+
+  document.getElementById("hostNetDown").textContent=
+   Number(d.network.down_mbps||0).toFixed(2);
+
+  document.getElementById("hostNetUp").textContent=
+   Number(d.network.up_mbps||0).toFixed(2);
+
+  document.getElementById("hostRxTotal").textContent=
+   hostBytes(d.network.rx_total);
+
+  document.getElementById("hostTxTotal").textContent=
+   hostBytes(d.network.tx_total);
+
+
+  const interfaces=d.network.interfaces||[];
+
+  document.getElementById("hostInterfaces").innerHTML=
+   interfaces.length
+   ? interfaces.map(x=>
+      '<div style="padding:8px 0;border-bottom:1px solid #142b40">'+
+      '<b>'+x.name+'</b>'+
+      '<span style="float:right">'+
+      '↓ '+hostBytes(x.rx)+' &nbsp; ↑ '+hostBytes(x.tx)+
+      '</span></div>'
+     ).join("")
+   : "Ağ arayüzü bulunamadı.";
+
+ }catch(e){
+
+  const status=document.getElementById("hostStatus");
+
+  if(status){
+   status.textContent="● Çevrimdışı";
+   status.className="offline";
+  }
+
+ }
+}
+
+function startHostMonitoring(){
+ if(hostTimer)
+  clearInterval(hostTimer);
+
+ loadHostStats();
+
+ hostTimer=setInterval(loadHostStats,2000);
+}
+
+function stopHostMonitoring(){
+ if(hostTimer){
+  clearInterval(hostTimer);
+  hostTimer=null;
+ }
+}
+</script>
+
+<script>
+let obsAudioSocket=null;
+let obsAudioReconnect=null;
+
+function dbToPercent(db){
+ db=Number(db);
+ if(!Number.isFinite(db)) db=-60;
+ db=Math.max(-60,Math.min(0,db));
+ return ((db+60)/60)*100;
+}
+
+function updateAudioMeter(input){
+
+ const meters=[
+  ...document.querySelectorAll(".liveMeter")
+ ].filter(function(m){
+  return m.dataset.meter===input.name;
+ });
+
+ if(!meters.length)return;
+
+ const channels=input.channels || [];
+
+ meters.forEach(function(meter){
+
+  const rows=meter.querySelectorAll(".meterChannel");
+
+  rows.forEach(function(row,index){
+
+   let db=-60;
+
+   if(channels[index] !== undefined)
+    db=channels[index];
+   else if(channels[0] !== undefined)
+    db=channels[0];
+
+   const fill=row.querySelector(".meterFill");
+   const label=row.querySelector(".meterDb");
+
+   if(fill)
+    fill.style.width=dbToPercent(db)+"%";
+
+   if(label)
+    label.textContent=
+     Number(db).toFixed(1)+" dB";
+
+  });
+
+  if(rows[1]){
+   rows[1].style.display=
+    channels.length < 2 ? "none" : "grid";
+  }
+
+ });
+
+}
+
+function connectObsAudioMeter(){
+ if(obsAudioSocket && (obsAudioSocket.readyState===WebSocket.OPEN || obsAudioSocket.readyState===WebSocket.CONNECTING)) return;
+
+ const protocol=location.protocol==="https:" ? "wss:" : "ws:";
+ const url=protocol+"//"+location.host+"/ws/obs/audio";
+
+ obsAudioSocket=new WebSocket(url);
+
+ obsAudioSocket.onopen=function(){
+  console.log("OBS audio meter connected");
+  obsAudioSocket.send("hello");
+ };
+
+ obsAudioSocket.onmessage=function(event){
+  try{
+   const data=JSON.parse(event.data);
+   if(data.type!=="audio_meter") return;
+   (data.inputs || []).forEach(updateAudioMeter);
+  }catch(e){
+   console.error("OBS audio meter:",e);
+  }
+ };
+
+ obsAudioSocket.onclose=function(){
+  obsAudioSocket=null;
+  clearTimeout(obsAudioReconnect);
+  obsAudioReconnect=setTimeout(connectObsAudioMeter,2000);
+ };
+
+ obsAudioSocket.onerror=function(){
+  try{obsAudioSocket.close();}catch(e){}
+ };
+}
+
+connectObsAudioMeter();
+</script>
+
+
+<script>
+/* YOUTUBE LIVE CHAT */
+let youtubeChatTimer = null;
+let youtubeNextPageToken = null;
+let youtubeLiveChatId = null;
+let youtubeSeenMessages = new Set();
+let youtubePolling = false;
+
+function youtubeEscape(value){
+ const div=document.createElement("div");
+ div.textContent=value == null ? "" : String(value);
+ return div.innerHTML;
+}
+
+function youtubeSetStatus(text,online=false){
+ const el=document.getElementById("youtubeChatStatus");
+ if(!el) return;
+
+ el.textContent=text;
+ el.className="small " + (online ? "chatOnline" : "chatOffline");
+}
+
+function youtubeShowEmpty(text){
+ const box=document.getElementById("youtubeChat");
+ if(!box) return;
+
+ box.innerHTML=
+  '<div class="chatEmpty">'+youtubeEscape(text)+'</div>';
+}
+
+function youtubeAddMessage(msg){
+ const box=document.getElementById("youtubeChat");
+ if(!box || !msg || !msg.id) return;
+
+ if(youtubeSeenMessages.has(msg.id)) return;
+ youtubeSeenMessages.add(msg.id);
+
+ const empty=box.querySelector(".chatEmpty");
+ if(empty) empty.remove();
+
+ const row=document.createElement("div");
+ row.className="chatMessage";
+
+ let time="";
+ if(msg.published_at){
+  const d=new Date(msg.published_at);
+  if(!Number.isNaN(d.getTime())){
+   time=d.toLocaleTimeString("tr-TR",{
+    hour:"2-digit",
+    minute:"2-digit"
+   });
+  }
+ }
+
+ let badge="";
+ if(msg.is_owner) badge=" 👑";
+ else if(msg.is_moderator) badge=" 🛡️";
+ else if(msg.is_member) badge=" ⭐";
+
+ row.innerHTML=
+  '<span class="chatTime">'+youtubeEscape(time)+'</span>'+
+  '<span class="chatAuthor">'+
+   youtubeEscape(msg.author || "YouTube")+
+   badge+
+  '</span>'+
+  '<span class="chatText">'+
+   youtubeEscape(msg.message || "")+
+  '</span>';
+
+ box.appendChild(row);
+
+ while(box.children.length > 200){
+  box.removeChild(box.firstChild);
+ }
+
+ box.scrollTop=box.scrollHeight;
+}
+
+function youtubeSchedule(ms){
+ clearTimeout(youtubeChatTimer);
+
+ let delay=Number(ms);
+ if(!Number.isFinite(delay)) delay=5000;
+
+ delay=Math.max(2000,delay);
+
+ youtubeChatTimer=setTimeout(
+  pollYouTubeChat,
+  delay
+ );
+}
+
+async function pollYouTubeChat(){
+ if(youtubePolling) return;
+ youtubePolling=true;
+
+ try{
+  let url="/api/youtube/chat";
+
+  const params=new URLSearchParams();
+
+  if(youtubeLiveChatId){
+   params.set("live_chat_id",youtubeLiveChatId);
+  }
+
+  if(youtubeNextPageToken){
+   params.set("page_token",youtubeNextPageToken);
+  }
+
+  const qs=params.toString();
+  if(qs) url+="?"+qs;
+
+  const response=await fetch(url,{
+   cache:"no-store"
+  });
+
+  if(response.status===401){
+   youtubeSetStatus("● Bağlantı Gerekli",false);
+   youtubeShowEmpty("YouTube hesabı bağlı değil.");
+   youtubeSchedule(10000);
+   return;
+  }
+
+  if(!response.ok){
+   throw new Error("HTTP "+response.status);
+  }
+
+  const data=await response.json();
+
+  if(!data.live){
+   youtubeLiveChatId=null;
+   youtubeNextPageToken=null;
+   youtubeSeenMessages.clear();
+
+   youtubeSetStatus("● Yayın Yok",false);
+   youtubeShowEmpty("Aktif YouTube yayını bulunamadı.");
+
+   youtubeSchedule(10000);
+   return;
+  }
+
+  if(data.chat_available===false){
+   youtubeLiveChatId=null;
+   youtubeNextPageToken=null;
+
+   youtubeSetStatus("● Sohbet Kapalı",false);
+   youtubeShowEmpty(
+    data.message || "YouTube canlı sohbeti kullanılamıyor."
+   );
+
+   youtubeSchedule(10000);
+   return;
+  }
+
+  if(
+   youtubeLiveChatId &&
+   data.live_chat_id &&
+   youtubeLiveChatId!==data.live_chat_id
+  ){
+   youtubeNextPageToken=null;
+   youtubeSeenMessages.clear();
+
+   const box=document.getElementById("youtubeChat");
+   if(box) box.innerHTML="";
+  }
+
+  youtubeLiveChatId=data.live_chat_id || null;
+  youtubeNextPageToken=data.next_page_token || null;
+
+  youtubeSetStatus("● Canlı",true);
+
+  (data.messages || []).forEach(youtubeAddMessage);
+
+  const box=document.getElementById("youtubeChat");
+
+  if(
+   box &&
+   !box.querySelector(".chatMessage") &&
+   !box.querySelector(".chatEmpty")
+  ){
+   youtubeShowEmpty("Canlı sohbet bekleniyor...");
+  }
+
+  youtubeSchedule(data.polling_interval_ms || 5000);
+
+ }catch(error){
+  console.error("YouTube chat:",error);
+
+  youtubeSetStatus("● Bağlantı Hatası",false);
+
+  youtubeSchedule(10000);
+
+ }finally{
+  youtubePolling=false;
+ }
+}
+
+function startYouTubeChat(){
+ if(youtubeChatTimer){
+  clearTimeout(youtubeChatTimer);
+  youtubeChatTimer=null;
+ }
+
+ pollYouTubeChat();
+}
+
+startYouTubeChat();
+</script>
+
+
+<script>
+/* KICK LIVE CHAT */
+
+const KICK_CHATROOM_ID = 26837501;
+const KICK_PUSHER_KEY = "32cbd69e4b950bf97679";
+
+let kickSocket = null;
+let kickReconnectTimer = null;
+let kickPingTimer = null;
+let kickSeenMessages = new Set();
+let kickIntentionalClose = false;
+
+function kickEscape(value){
+ const div=document.createElement("div");
+ div.textContent=value == null ? "" : String(value);
+ return div.innerHTML;
+}
+
+function kickSetStatus(text,online=false){
+ const el=document.getElementById("kickChatStatus");
+ if(!el) return;
+
+ el.textContent=text;
+ el.className="small " + (online ? "chatOnline" : "chatOffline");
+}
+
+function kickShowEmpty(text){
+ const box=document.getElementById("kickChat");
+ if(!box) return;
+
+ if(box.querySelector(".chatMessage")) return;
+
+ box.innerHTML=
+  '<div class="chatEmpty">'+kickEscape(text)+'</div>';
+}
+
+function kickAddMessage(data){
+ const box=document.getElementById("kickChat");
+ if(!box || !data) return;
+
+ const id=
+  data.id ||
+  data.message_id ||
+  (
+   String(data.created_at || "") + ":" +
+   String(data.sender?.id || "") + ":" +
+   String(data.content || "")
+  );
+
+ if(kickSeenMessages.has(id)) return;
+ kickSeenMessages.add(id);
+
+ if(kickSeenMessages.size > 500){
+  kickSeenMessages.clear();
+ }
+
+ const empty=box.querySelector(".chatEmpty");
+ if(empty) empty.remove();
+
+ const sender=data.sender || {};
+
+ const author=
+  sender.username ||
+  sender.slug ||
+  sender.identity?.username ||
+  "Kick";
+
+ let time="";
+
+ if(data.created_at){
+  const d=new Date(data.created_at);
+
+  if(!Number.isNaN(d.getTime())){
+   time=d.toLocaleTimeString("tr-TR",{
+    hour:"2-digit",
+    minute:"2-digit"
+   });
+  }
+ }
+
+ const row=document.createElement("div");
+ row.className="chatMessage";
+
+ row.innerHTML=
+  '<span class="chatTime">'+kickEscape(time)+'</span>'+
+  '<span class="chatAuthor">'+kickEscape(author)+'</span>'+
+  '<span class="chatText">'+kickEscape(data.content || "")+'</span>';
+
+ box.appendChild(row);
+
+ while(box.children.length > 200){
+  box.removeChild(box.firstChild);
+ }
+
+ box.scrollTop=box.scrollHeight;
+}
+
+function kickParseData(value){
+ if(typeof value==="object" && value!==null){
+  return value;
+ }
+
+ if(typeof value!=="string"){
+  return {};
+ }
+
+ try{
+  return JSON.parse(value);
+ }catch{
+  return {};
+ }
+}
+
+function kickSubscribe(){
+ if(!kickSocket || kickSocket.readyState!==WebSocket.OPEN){
+  return;
+ }
+
+ kickSocket.send(JSON.stringify({
+  event:"pusher:subscribe",
+  data:{
+   auth:"",
+   channel:"chatrooms."+KICK_CHATROOM_ID+".v2"
+  }
+ }));
+}
+
+function kickStartPing(){
+ clearInterval(kickPingTimer);
+
+ kickPingTimer=setInterval(()=>{
+  if(kickSocket && kickSocket.readyState===WebSocket.OPEN){
+   kickSocket.send(JSON.stringify({
+    event:"pusher:ping",
+    data:{}
+   }));
+  }
+ },50000);
+}
+
+function kickScheduleReconnect(){
+ clearTimeout(kickReconnectTimer);
+
+ kickReconnectTimer=setTimeout(()=>{
+  connectKickChat();
+ },3000);
+}
+
+function connectKickChat(){
+ clearTimeout(kickReconnectTimer);
+ clearInterval(kickPingTimer);
+
+ kickIntentionalClose=false;
+
+ if(
+  kickSocket &&
+  (
+   kickSocket.readyState===WebSocket.OPEN ||
+   kickSocket.readyState===WebSocket.CONNECTING
+  )
+ ){
+  return;
+ }
+
+ kickSetStatus("● Bağlanıyor",false);
+ kickShowEmpty("Kick sohbetine bağlanılıyor...");
+
+ const url=
+  "wss://ws-us2.pusher.com/app/"+KICK_PUSHER_KEY+
+  "?protocol=7&client=js&version=8.4.0&flash=false";
+
+ try{
+  kickSocket=new WebSocket(url);
+ }catch(error){
+  console.error("Kick WebSocket:",error);
+  kickSetStatus("● Bağlantı Hatası",false);
+  kickScheduleReconnect();
+  return;
+ }
+
+ kickSocket.onopen=()=>{
+  console.log("Kick WebSocket connected");
+ };
+
+ kickSocket.onmessage=(event)=>{
+  let packet;
+
+  try{
+   packet=JSON.parse(event.data);
+  }catch{
+   return;
+  }
+
+  if(packet.event==="pusher:connection_established"){
+   kickSubscribe();
+   kickStartPing();
+   return;
+  }
+
+  if(packet.event==="pusher_internal:subscription_succeeded"){
+   kickSetStatus("● Bağlı",true);
+   kickShowEmpty("Kick sohbeti bekleniyor...");
+   return;
+  }
+
+  if(packet.event==="pusher:ping"){
+   if(kickSocket?.readyState===WebSocket.OPEN){
+    kickSocket.send(JSON.stringify({
+     event:"pusher:pong",
+     data:{}
+    }));
+   }
+   return;
+  }
+
+  if(packet.event==="pusher:pong"){
+   return;
+  }
+
+  if(
+   packet.event==="App\\Events\\ChatMessageEvent" ||
+   packet.event==="ChatMessageEvent"
+  ){
+   const data=kickParseData(packet.data);
+   kickAddMessage(data);
+  }
+ };
+
+ kickSocket.onerror=(error)=>{
+  console.error("Kick WebSocket error:",error);
+ };
+
+ kickSocket.onclose=()=>{
+  clearInterval(kickPingTimer);
+  kickPingTimer=null;
+  kickSocket=null;
+
+  kickSetStatus("● Bağlantı Kesildi",false);
+  kickShowEmpty("Kick sohbet bağlantısı kesildi.");
+
+  if(!kickIntentionalClose){
+   kickScheduleReconnect();
+  }
+ };
+}
+
+connectKickChat();
+</script>
+
+
+<script>
+/* DASHBOARD SETTINGS UI */
+
+let dashboardSettingsLoaded=false;
+
+function settingsValue(id,value){
+ const el=document.getElementById(id);
+ if(el) el.value=value ?? "";
+}
+
+function settingsNumberOrNull(id){
+ const el=document.getElementById(id);
+ if(!el || el.value.trim()==="") return null;
+
+ const n=Number(el.value);
+ return Number.isFinite(n) ? n : null;
+}
+
+function updateDockerSettingsVisibility(){
+ const type=document.getElementById("settingsDockerType")?.value || "local";
+ const socket=document.getElementById("settingsDockerSocketField");
+ const host=document.getElementById("settingsDockerHostField");
+
+ if(socket) socket.style.display=type==="local" ? "block" : "none";
+ if(host) host.style.display=type==="remote" ? "block" : "none";
+}
+
+function settingsSecretInfo(id,isSet,label){
+ const el=document.getElementById(id);
+ if(!el) return;
+
+ if(isSet){
+  el.textContent="● "+label+" kayıtlı — değiştirmek istemiyorsan boş bırak.";
+  el.className="settingsStatus ok";
+ }else{
+  el.textContent="● "+label+" kayıtlı değil.";
+  el.className="settingsStatus warn";
+ }
+}
+
+async function loadDashboardSettings(){
+ const message=document.getElementById("settingsMessage");
+
+ try{
+  if(message){
+   message.textContent="Ayarlar yükleniyor...";
+   message.className="settingsStatus";
+  }
+
+  const r=await fetch("/api/settings",{cache:"no-store"});
+
+  if(!r.ok)
+   throw new Error("HTTP "+r.status);
+
+  const response=await r.json();
+  const d=response.settings || {};
+
+  const youtube=d.youtube || {};
+  const kick=d.kick || {};
+  const weather=d.weather || {};
+  const obs=d.obs || {};
+  const docker=d.docker || {};
+  const host=d.host_monitor || {};
+  const windows=d.windows_monitor || {};
+
+  settingsValue("settingsYoutubeClientId",youtube.client_id);
+  settingsValue("settingsYoutubeRedirect",youtube.redirect_uri);
+  settingsValue("settingsYoutubeSecret","");
+
+  settingsSecretInfo(
+   "settingsYoutubeSecretInfo",
+   !!youtube.client_secret_set,
+   "Client Secret"
+  );
+
+  settingsValue("settingsKickChannel",kick.channel);
+  settingsValue("settingsKickChannelId",kick.channel_id);
+  settingsValue("settingsKickChatroomId",kick.chatroom_id);
+
+  settingsValue("settingsWeatherLocation",weather.location);
+  settingsValue("settingsWeatherLat",weather.latitude);
+  settingsValue("settingsWeatherLon",weather.longitude);
+
+  settingsValue("settingsObsHost",obs.host);
+  settingsValue("settingsObsPort",obs.port);
+  settingsValue("settingsObsPassword","");
+
+  settingsSecretInfo(
+   "settingsObsPasswordInfo",
+   !!obs.password_set,
+   "OBS şifresi"
+  );
+
+  settingsValue(
+   "settingsDockerType",
+   docker.connection_type || "local"
+  );
+  settingsValue("settingsDockerSocket",docker.socket);
+  settingsValue("settingsDockerHost",docker.host);
+
+  settingsValue("settingsHostName",host.name);
+  settingsValue("settingsHostProc",host.proc_path);
+  settingsValue("settingsHostRoot",host.root_path);
+  settingsValue(
+   "settingsHostInterface",
+   host.network_interface || "auto"
+  );
+
+  settingsValue("settingsWindowsName",windows.name);
+  settingsValue(
+   "settingsWindowsHostname",
+   windows.expected_hostname
+  );
+  settingsValue("settingsWindowsToken","");
+  settingsValue(
+   "settingsWindowsTimeout",
+   windows.timeout ?? 15
+  );
+
+  settingsSecretInfo(
+   "settingsWindowsTokenInfo",
+   !!windows.agent_token_set,
+   "Agent token"
+  );
+
+  const ys=document.getElementById("settingsYoutubeStatus");
+
+  if(ys){
+   ys.textContent=youtube.client_secret_set
+    ? "● Yapılandırılmış"
+    : "● Eksik";
+
+   ys.className="settingsStatus "+
+    (youtube.client_secret_set ? "ok" : "warn");
+  }
+
+  updateDockerSettingsVisibility();
+
+  dashboardSettingsLoaded=true;
+
+  if(message){
+   message.textContent="";
+   message.className="settingsStatus";
+  }
+
+ }catch(e){
+  console.error("Settings load:",e);
+
+  if(message){
+   message.textContent="Ayarlar yüklenemedi: "+e.message;
+   message.className="settingsStatus error";
+  }
+ }
+}
+
+
+async function saveDashboardSettings(){
+ const save=document.getElementById("settingsSave");
+ const message=document.getElementById("settingsMessage");
+
+ if(save) save.disabled=true;
+
+ try{
+  if(message){
+   message.textContent="Kaydediliyor...";
+   message.className="settingsStatus";
+  }
+
+  const payload={
+   youtube:{
+    client_id:
+     document.getElementById("settingsYoutubeClientId").value.trim(),
+
+    redirect_uri:
+     document.getElementById("settingsYoutubeRedirect").value.trim()
+   },
+
+   kick:{
+    channel:
+     document.getElementById("settingsKickChannel").value.trim(),
+
+    channel_id:
+     settingsNumberOrNull("settingsKickChannelId"),
+
+    chatroom_id:
+     settingsNumberOrNull("settingsKickChatroomId")
+   },
+
+   weather:{
+    location:
+     document.getElementById("settingsWeatherLocation").value.trim(),
+
+    latitude:
+     settingsNumberOrNull("settingsWeatherLat"),
+
+    longitude:
+     settingsNumberOrNull("settingsWeatherLon")
+   },
+
+   obs:{
+    host:
+     document.getElementById("settingsObsHost").value.trim(),
+
+    port:
+     Number(document.getElementById("settingsObsPort").value || 4455)
+   },
+
+   docker:{
+    connection_type:
+     document.getElementById("settingsDockerType").value,
+
+    socket:
+     document.getElementById("settingsDockerSocket").value.trim(),
+
+    host:
+     document.getElementById("settingsDockerHost").value.trim()
+   },
+
+   host_monitor:{
+    name:
+     document.getElementById("settingsHostName").value.trim(),
+
+    proc_path:
+     document.getElementById("settingsHostProc").value.trim(),
+
+    root_path:
+     document.getElementById("settingsHostRoot").value.trim(),
+
+    network_interface:
+     document.getElementById("settingsHostInterface").value.trim() || "auto"
+   },
+
+   windows_monitor:{
+    name:
+     document.getElementById("settingsWindowsName").value.trim(),
+
+    expected_hostname:
+     document.getElementById("settingsWindowsHostname").value.trim(),
+
+    timeout:
+     Number(document.getElementById("settingsWindowsTimeout").value || 15)
+   }
+  };
+
+  const youtubeSecret=
+   document.getElementById("settingsYoutubeSecret").value.trim();
+
+  const obsPassword=
+   document.getElementById("settingsObsPassword").value;
+
+  const windowsToken=
+   document.getElementById("settingsWindowsToken").value.trim();
+
+  if(youtubeSecret)
+   payload.youtube.client_secret=youtubeSecret;
+
+  if(obsPassword)
+   payload.obs.password=obsPassword;
+
+  if(windowsToken)
+   payload.windows_monitor.agent_token=windowsToken;
+
+  const r=await fetch("/api/settings",{
+   method:"PUT",
+   headers:{
+    "Content-Type":"application/json"
+   },
+   body:JSON.stringify(payload)
+  });
+
+  let result={};
+
+  try{
+   result=await r.json();
+  }catch(e){}
+
+  if(!r.ok){
+   throw new Error(
+    result.detail ||
+    ("HTTP "+r.status)
+   );
+  }
+
+  if(message){
+   message.textContent="✓ Ayarlar kaydedildi.";
+   message.className="settingsStatus ok";
+  }
+
+  weatherLoaded=false;
+
+  await loadDashboardSettings();
+
+  if(message){
+   message.textContent="✓ Ayarlar kaydedildi.";
+   message.className="settingsStatus ok";
+  }
+
+ }catch(e){
+  console.error("Settings save:",e);
+
+  if(message){
+   message.textContent="Kaydetme hatası: "+e.message;
+   message.className="settingsStatus error";
+  }
+
+ }finally{
+  if(save) save.disabled=false;
+ }
+}
+
+
+document.getElementById("settingsSave")
+ ?.addEventListener("click",saveDashboardSettings);
+
+document.getElementById("settingsReload")
+ ?.addEventListener("click",loadDashboardSettings);
+
+document.getElementById("settingsDockerType")
+ ?.addEventListener("change",updateDockerSettingsVisibility);
+
+
+document.querySelectorAll(".settingsEye").forEach(function(button){
+ button.addEventListener("click",function(){
+  const input=document.getElementById(button.dataset.secret);
+
+  if(!input) return;
+
+  input.type=input.type==="password" ? "text" : "password";
+  button.textContent=input.type==="password" ? "👁" : "🙈";
+ });
+});
+
+
+document.querySelectorAll(".nav div").forEach(function(item){
+ item.addEventListener("click",function(){
+  if(item.dataset.page==="settings"){
+   loadDashboardSettings();
+  }
+ });
+});
+</script>
+
+
+<script>
+/* WEATHER LOCATION SEARCH UI */
+
+function weatherLocationEsc(value){
+ return String(value ?? "").replace(/[&<>"']/g,function(c){
+  return {
+   "&":"&amp;",
+   "<":"&lt;",
+   ">":"&gt;",
+   '"':"&quot;",
+   "'":"&#39;"
+  }[c];
+ });
+}
+
+async function searchWeatherLocation(){
+ const input=document.getElementById("settingsWeatherLocation");
+ const status=document.getElementById("settingsWeatherSearchStatus");
+ const results=document.getElementById("settingsWeatherResults");
+ const button=document.getElementById("settingsWeatherSearch");
+
+ if(!input || !status || !results) return;
+
+ const raw=input.value.trim();
+
+ if(raw.length<2){
+  status.textContent="İlçe veya şehir adı gir.";
+  status.className="settingsStatus warn";
+  return;
+ }
+
+ /*
+   Open-Meteo "Ümraniye İstanbul" sorgusunda sonuç
+   vermeyebildiği için önce virgülden önceki ilçe/şehir
+   adını arıyoruz. İl bilgisi aşağıda sonuçları sıralamak
+   için kullanılıyor.
+ */
+ const parts=raw.split(",").map(x=>x.trim()).filter(Boolean);
+ const searchName=parts[0];
+ const requestedAdmin=(parts[1] || "").toLocaleLowerCase("tr-TR");
+
+ try{
+  if(button) button.disabled=true;
+
+  status.textContent="Konum aranıyor...";
+  status.className="settingsStatus";
+
+  results.style.display="none";
+  results.innerHTML="";
+
+  const r=await fetch(
+   "/api/settings/weather/search?q="+
+   encodeURIComponent(searchName),
+   {cache:"no-store"}
+  );
+
+  if(!r.ok){
+   let detail="HTTP "+r.status;
+
+   try{
+    const err=await r.json();
+    detail=err.detail || detail;
+   }catch(e){}
+
+   throw new Error(detail);
+  }
+
+  const data=await r.json();
+  let locations=Array.isArray(data.results) ? data.results : [];
+
+  if(requestedAdmin){
+   locations.sort(function(a,b){
+    const aa=String(a.admin1 || "").toLocaleLowerCase("tr-TR");
+    const ba=String(b.admin1 || "").toLocaleLowerCase("tr-TR");
+
+    const am=aa.includes(requestedAdmin) ? 1 : 0;
+    const bm=ba.includes(requestedAdmin) ? 1 : 0;
+
+    return bm-am;
+   });
+  }
+
+  if(!locations.length){
+   status.textContent="Konum bulunamadı.";
+   status.className="settingsStatus warn";
+   return;
+  }
+
+  status.textContent=
+   locations.length+" sonuç bulundu. Doğru konumu seç.";
+
+  status.className="settingsStatus ok";
+
+  results.innerHTML=locations.map(function(x,index){
+   const title=[
+    x.name,
+    x.admin2,
+    x.admin1
+   ].filter(Boolean)
+    .filter((v,i,a)=>a.indexOf(v)===i)
+    .join(", ");
+
+   return `
+    <button type="button"
+            class="weatherLocationResult"
+            data-index="${index}"
+            style="
+             width:100%;
+             text-align:left;
+             margin-bottom:6px;
+             padding:10px 12px;
+             border:1px solid #1c3a55;
+             border-radius:10px;
+             background:#071725;
+             color:#e9f2ff;
+             cursor:pointer">
+     <div style="font-weight:700">
+      📍 ${weatherLocationEsc(title)}
+     </div>
+     <div style="
+       color:#7890a8;
+       font-size:10px;
+       margin-top:4px">
+      ${weatherLocationEsc(x.country || "")}
+      · ${weatherLocationEsc(x.latitude)}
+      , ${weatherLocationEsc(x.longitude)}
+     </div>
+    </button>`;
+  }).join("");
+
+  results.style.display="block";
+
+  results.querySelectorAll(".weatherLocationResult")
+   .forEach(function(el){
+
+    el.addEventListener("click",function(){
+     const x=locations[Number(el.dataset.index)];
+
+     if(!x) return;
+
+     const locationName=[
+      x.name,
+      x.admin1
+     ].filter(Boolean)
+      .filter((v,i,a)=>a.indexOf(v)===i)
+      .join(", ");
+
+     document.getElementById("settingsWeatherLocation").value=
+      locationName;
+
+     document.getElementById("settingsWeatherLat").value=
+      x.latitude ?? "";
+
+     document.getElementById("settingsWeatherLon").value=
+      x.longitude ?? "";
+
+     status.textContent=
+      "✓ Seçildi: "+locationName+
+      " — şimdi Ayarları Kaydet.";
+
+     status.className="settingsStatus ok";
+
+     results.style.display="none";
+    });
+   });
+
+ }catch(e){
+  console.error("Weather location search:",e);
+
+  status.textContent="Konum arama hatası: "+e.message;
+  status.className="settingsStatus error";
+
+ }finally{
+  if(button) button.disabled=false;
+ }
+}
+
+document.getElementById("settingsWeatherSearch")
+ ?.addEventListener("click",searchWeatherLocation);
+
+document.getElementById("settingsWeatherLocation")
+ ?.addEventListener("keydown",function(e){
+  if(e.key==="Enter"){
+   e.preventDefault();
+   searchWeatherLocation();
+  }
+ });
+</script>
+
+
+<script>
+/* HOME SUMMARY JS */
+
+let homeSummaryTimer=null;
+let homeWeatherLastLoad=0;
+
+function homeSetText(id,value){
+ const el=document.getElementById(id);
+ if(el) el.textContent=value;
+}
+
+function homeSetStatus(id,text,online){
+ const el=document.getElementById(id);
+ if(!el)return;
+
+ el.textContent=text;
+ el.className=
+  "homeSummaryStatus "+(online ? "online" : "offline");
+}
+
+function homePercent(value){
+ const n=Number(value);
+ return Number.isFinite(n) ? Math.round(n)+"%" : "-";
+}
+
+async function loadHomePc(){
+ try{
+  const r=await fetch("/api/metrics",{cache:"no-store"});
+  if(!r.ok)throw new Error();
+
+  const d=await r.json();
+
+  if(!d.hostname)throw new Error();
+
+  homeSetStatus(
+   "homePcStatus",
+   "● Çevrimiçi",
+   true
+  );
+
+  homeSetText("homePcCpu",homePercent(d.cpu));
+  homeSetText("homePcRam",homePercent(d.ram));
+  homeSetText("homePcGpu",homePercent(d.gpu));
+
+  homeUpdateNetwork(
+   "pc",
+   d.net_down_mbps,
+   d.net_up_mbps
+  );
+
+  homeSetText(
+   "homePcTemp",
+   d.gpu_temp!=null ? Math.round(Number(d.gpu_temp))+"°" : "-"
+  );
+
+ }catch(e){
+  homeSetStatus(
+   "homePcStatus",
+   "● Çevrimdışı",
+   false
+  );
+ }
+}
+
+async function loadHomeHost(){
+ try{
+  const r=await fetch("/api/host/stats",{cache:"no-store"});
+  if(!r.ok)throw new Error();
+
+  const d=await r.json();
+
+  homeSetStatus(
+   "homeHostStatus",
+   "● Çevrimiçi",
+   true
+  );
+
+  homeSetText(
+   "homeHostCpu",
+   homePercent(
+    d.cpu_percent ??
+    d.cpu?.percent ??
+    d.cpu
+   )
+  );
+
+  homeSetText(
+   "homeHostRam",
+   homePercent(
+    d.memory_percent ??
+    d.ram_percent ??
+    d.memory?.percent ??
+    d.ram?.percent
+   )
+  );
+
+  homeSetText(
+   "homeHostDisk",
+   homePercent(
+    d.disk_percent ??
+    d.disk?.percent
+   )
+  );
+
+  homeUpdateNetwork(
+   "host",
+   d.network?.down_mbps,
+   d.network?.up_mbps
+  );
+
+ }catch(e){
+  homeSetStatus(
+   "homeHostStatus",
+   "● Çevrimdışı",
+   false
+  );
+ }
+}
+
+async function loadHomeDocker(){
+ try{
+  const r=await fetch(
+   "/api/docker/summary",
+   {cache:"no-store"}
+  );
+
+  if(!r.ok)throw new Error();
+
+  const d=await r.json();
+
+  homeSetStatus(
+   "homeDockerStatus",
+   "● Çevrimiçi",
+   true
+  );
+
+  homeSetText(
+   "homeDockerRunning",
+   d.running ?? "-"
+  );
+
+  homeSetText(
+   "homeDockerTotal",
+   d.containers ?? "-"
+  );
+
+  homeSetText(
+   "homeDockerImages",
+   d.images ?? "-"
+  );
+
+ }catch(e){
+  homeSetStatus(
+   "homeDockerStatus",
+   "● Çevrimdışı",
+   false
+  );
+ }
+}
+
+async function loadHomeObs(){
+ try{
+  const r=await fetch(
+   "/api/obs/status",
+   {cache:"no-store"}
+  );
+
+  if(!r.ok)throw new Error();
+
+  const d=await r.json();
+
+  if(!d.connected)throw new Error();
+
+  homeSetStatus(
+   "homeObsStatus",
+   "● OBS Bağlı",
+   true
+  );
+
+  homeSetText(
+   "homeObsLive",
+   d.streaming ? "🔴 CANLI" : "⚫ Kapalı"
+  );
+
+  homeSetText(
+   "homeObsScene",
+   d.current_scene || "-"
+  );
+
+ }catch(e){
+  homeSetStatus(
+   "homeObsStatus",
+   "● OBS Yok",
+   false
+  );
+
+  homeSetText("homeObsLive","-");
+  homeSetText("homeObsScene","-");
+ }
+}
+
+async function loadHomeWeather(force=false){
+
+ /*
+   Hava bilgisini PC/Host kadar sık sorgulamıyoruz.
+   Normal durumda 10 dakikada bir yenilenir.
+ */
+ if(
+  !force &&
+  homeWeatherLastLoad &&
+  Date.now()-homeWeatherLastLoad < 600000
+ ){
+  return;
+ }
+
+ try{
+  const sr=await fetch(
+   "/api/settings",
+   {cache:"no-store"}
+  );
+
+  if(!sr.ok)throw new Error();
+
+  const sd=await sr.json();
+  const w=sd.settings?.weather || {};
+
+  if(w.latitude==null || w.longitude==null)
+   throw new Error();
+
+  const p=new URLSearchParams({
+   lat:String(w.latitude),
+   lon:String(w.longitude),
+   name:w.location || "Seçili konum"
+  });
+
+  const r=await fetch(
+   "/api/weather?"+p,
+   {cache:"no-store"}
+  );
+
+  if(!r.ok)throw new Error();
+
+  const d=await r.json();
+  const c=d.current;
+
+  homeSetText(
+   "homeWeatherLocation",
+   "📍 "+(d.location?.name || w.location || "-")
+  );
+
+  homeSetText(
+   "homeWeatherTemp",
+   Math.round(Number(c.temperature))+"°"
+  );
+
+  homeSetText(
+   "homeWeatherDescription",
+   c.description || "-"
+  );
+
+  homeSetText(
+   "homeWeatherFeels",
+   c.apparent_temperature!=null
+    ? Math.round(Number(c.apparent_temperature))+"°"
+    : "-"
+  );
+
+  homeSetText(
+   "homeWeatherHumidity",
+   c.humidity!=null ? c.humidity+"%" : "-"
+  );
+
+  homeWeatherLastLoad=Date.now();
+
+ }catch(e){
+  homeSetText(
+   "homeWeatherDescription",
+   "Hava bilgisi alınamadı"
+  );
+ }
+}
+
+async function loadHomeSummary(forceWeather=false){
+ if(
+  typeof currentPage!=="undefined" &&
+  currentPage!=="home"
+ )return;
+
+ await Promise.allSettled([
+  loadHomePc(),
+  loadHomeHost(),
+  loadHomeDocker(),
+  loadHomeDockerNetwork(),
+  loadHomeObs(),
+  loadHomeObsAudio(),
+  loadHomeWeather(forceWeather)
+ ]);
+}
+
+function startHomeSummary(){
+ stopHomeSummary();
+
+ loadHomeSummary();
+
+ homeSummaryTimer=setInterval(
+  ()=>loadHomeSummary(),
+  5000
+ );
+}
+
+function stopHomeSummary(){
+ if(homeSummaryTimer){
+  clearInterval(homeSummaryTimer);
+  homeSummaryTimer=null;
+ }
+}
+
+/* Kart tiklandiginda ilgili sayfaya gec */
+document.querySelectorAll("[data-home-page]")
+ .forEach(function(card){
+
+  card.addEventListener("click",function(){
+   const target=card.dataset.homePage;
+
+   const nav=document.querySelector(
+    '.nav [data-page="'+target+'"]'
+   );
+
+   if(nav)nav.click();
+  });
+
+ });
+
+/*
+ Dashboard ilk acildiginda Ana Sayfa aktif.
+ currentPage ana scriptte tanimlandiktan sonra
+ kisa gecikmeyle summary baslatilir.
+ */
+setTimeout(function(){
+ if(
+  typeof currentPage!=="undefined" &&
+  currentPage==="home"
+ ){
+  startHomeSummary();
+ }
+},300);
+</script>
+
+
+<script>
+/* HOME OBS AUDIO CONTROL */
+
+async function loadHomeObsAudio(){
+ const el=document.getElementById("homeObsAudio");
+ if(!el)return;
+
+ try{
+  const r=await fetch("/api/obs/audio",{cache:"no-store"});
+  if(!r.ok)throw new Error();
+
+  const data=await r.json();
+
+  if(!data.length){
+   el.innerHTML='<div class="small">Ses kaynağı bulunamadı.</div>';
+   return;
+  }
+
+  el.innerHTML=data.map(function(a){
+
+   return `
+    <div class="homeObsAudioRow">
+
+     <div class="homeObsAudioHead">
+
+      <div class="homeObsAudioName"
+           title="${obsEsc(a.name)}">
+       ${a.muted ? "🔇" : "🔊"} ${obsEsc(a.name)}
+      </div>
+
+      <button
+       type="button"
+       class="homeObsMute ${a.muted ? "muted" : ""}"
+       data-input="${obsEsc(a.name)}"
+       data-muted="${a.muted ? "1" : "0"}">
+
+       ${a.muted ? "🔊 Aç" : "🔇 Kapat"}
+
+      </button>
+
+     </div>
+
+     <div class="liveMeter"
+          data-meter="${obsEsc(a.name)}">
+
+      <div class="meterChannel">
+       <span>L</span>
+       <div class="meterTrack">
+        <div class="meterFill"></div>
+       </div>
+       <b class="meterDb">-60.0 dB</b>
+      </div>
+
+      <div class="meterChannel meterRight">
+       <span>R</span>
+       <div class="meterTrack">
+        <div class="meterFill"></div>
+       </div>
+       <b class="meterDb">-60.0 dB</b>
+      </div>
+
+     </div>
+
+    </div>`;
+  }).join("");
+
+  el.querySelectorAll(".homeObsMute")
+   .forEach(function(btn){
+
+    btn.addEventListener("click",async function(event){
+
+     /*
+       Kartin data-home-page click'i tetiklenip
+       Yayın sayfasına geçmesin.
+     */
+     event.stopPropagation();
+
+     const currentlyMuted=
+      btn.dataset.muted==="1";
+
+     btn.disabled=true;
+
+     try{
+
+      await obsPost("/api/obs/audio/mute",{
+       input:btn.dataset.input,
+       muted:!currentlyMuted
+      });
+
+      /*
+       Hem Ana Sayfa hem normal Yayın sayfasındaki
+       mute durumunu senkronla.
+      */
+      await Promise.allSettled([
+       loadHomeObsAudio(),
+       loadObsAudio()
+      ]);
+
+     }catch(e){
+
+      alert(
+       "Ses değiştirilemedi: "+
+       e.message
+      );
+
+      btn.disabled=false;
+     }
+
+    });
+
+   });
+
+ }catch(e){
+
+  el.innerHTML=
+   '<div class="small">OBS ses kaynakları alınamadı.</div>';
+
+ }
+}
+</script>
+
+
+<script>
+/* HOME LIVE NETWORK */
+
+const homeNetScale={
+ pc:{max:1},
+ host:{max:1},
+ docker:{max:1}
+};
+
+let homeDockerNetPrevious=null;
+
+
+function homeNetFormat(v){
+
+ v=Number(v);
+
+ if(!Number.isFinite(v) || v<0)
+  v=0;
+
+ if(v<0.01)
+  return "0.00 Mbps";
+
+ if(v<10)
+  return v.toFixed(2)+" Mbps";
+
+ if(v<100)
+  return v.toFixed(1)+" Mbps";
+
+ return Math.round(v)+" Mbps";
+}
+
+
+function homeUpdateNetwork(type,down,up){
+
+ down=Math.max(0,Number(down)||0);
+ up=Math.max(0,Number(up)||0);
+
+ const peak=Math.max(down,up);
+
+ /*
+   Dinamik ölçek:
+   yeni tepeye hızlı çıkar,
+   boşta yavaşça küçülür.
+ */
+ if(peak>homeNetScale[type].max){
+
+  homeNetScale[type].max=
+   Math.max(1,peak*1.20);
+
+ }else{
+
+  homeNetScale[type].max=
+   Math.max(
+    1,
+    peak*1.20,
+    homeNetScale[type].max*0.94
+   );
+
+ }
+
+ const max=homeNetScale[type].max;
+
+ const inPercent=
+  Math.min(100,(down/max)*100);
+
+ const outPercent=
+  Math.min(100,(up/max)*100);
+
+
+ const prefix={
+  pc:"homePc",
+  host:"homeHost",
+  docker:"homeDocker"
+ }[type];
+
+
+ homeSetText(
+  prefix+"NetIn",
+  homeNetFormat(down)
+ );
+
+ homeSetText(
+  prefix+"NetOut",
+  homeNetFormat(up)
+ );
+
+
+ const inBar=
+  document.getElementById(prefix+"NetInBar");
+
+ const outBar=
+  document.getElementById(prefix+"NetOutBar");
+
+
+ if(inBar)
+  inBar.style.width=inPercent+"%";
+
+ if(outBar)
+  outBar.style.width=outPercent+"%";
+}
+
+
+async function loadHomeDockerNetwork(){
+
+ try{
+
+  const r=await fetch(
+   "/api/docker/containers",
+   {cache:"no-store"}
+  );
+
+  if(!r.ok)
+   throw new Error();
+
+  const data=await r.json();
+
+  let rx=0;
+  let tx=0;
+
+  data.forEach(function(c){
+
+   if(c.state!=="running")
+    return;
+
+   rx+=Number(c.network_rx)||0;
+   tx+=Number(c.network_tx)||0;
+
+  });
+
+
+  const now=performance.now();
+
+
+  if(homeDockerNetPrevious){
+
+   const seconds=
+    (now-homeDockerNetPrevious.time)/1000;
+
+   if(seconds>0){
+
+    const rxDelta=
+     Math.max(
+      0,
+      rx-homeDockerNetPrevious.rx
+     );
+
+    const txDelta=
+     Math.max(
+      0,
+      tx-homeDockerNetPrevious.tx
+     );
+
+    /*
+      byte -> bit -> megabit / saniye
+    */
+    const down=
+     (rxDelta*8)/
+     seconds/
+     1000000;
+
+    const up=
+     (txDelta*8)/
+     seconds/
+     1000000;
+
+    homeUpdateNetwork(
+     "docker",
+     down,
+     up
+    );
+
+   }
+
+  }
+
+
+  homeDockerNetPrevious={
+   rx:rx,
+   tx:tx,
+   time:now
+  };
+
+
+ }catch(e){
+
+  /*
+    API geçici olarak ulaşılamazsa önceki
+    değeri sahte şekilde sıfırlamıyoruz.
+  */
+
+ }
+
+}
+</script>
+
+</body>

@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+obsws-python
+google-api-python-client
+google-auth
+google-auth-oauthlib
+requests
