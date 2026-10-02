@@ -1878,10 +1878,10 @@ def youtube_chat(
         # live_chat_id verilmediyse aktif yayından otomatik bul.
         if not live_chat_id:
             broadcasts = youtube.liveBroadcasts().list(
-                part="id,snippet",
-                    broadcastType="all",
+                part="id,snippet,status",
+                broadcastType="all",
                 mine=True,
-                maxResults=5
+                maxResults=50
             ).execute()
 
             items = [
