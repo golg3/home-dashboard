@@ -79,7 +79,15 @@ def ingest(
     m: Metrics,
     authorization: str | None = Header(default=None)
 ):
-    if authorization != f"Bearer {TOKEN}":
+    # Navigator > Ayarlar > Windows Monitor > Agent Token
+    # önceliklidir. Ayarlarda token yoksa .env AGENT_TOKEN kullanılır.
+    settings = settings_load()
+    windows_settings = settings.get("windows_monitor", {})
+    active_token = str(
+        windows_settings.get("agent_token") or TOKEN
+    ).strip()
+
+    if authorization != f"Bearer {active_token}":
         raise HTTPException(401, "invalid token")
 
     d = m.model_dump()
