@@ -1,6 +1,8 @@
 services:
   api:
     build: ./backend
+    dns:
+      - 8.8.8.8
     restart: unless-stopped
     environment:
       AGENT_TOKEN: "${AGENT_TOKEN}"
@@ -18,6 +20,8 @@ services:
       - ./data:/app/data
   web:
     build: ./frontend
+    dns:
+      - 8.8.8.8
     restart: unless-stopped
     ports:
       - "8088:80"

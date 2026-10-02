@@ -892,16 +892,31 @@ def _obs_connect():
     global _obs_req_client
 
     if _obs_req_client is None:
+        settings = settings_load()
+        obs_cfg = settings.get("obs", {})
+
+        host = str(obs_cfg.get("host") or OBS_HOST).strip()
+
+        try:
+            port = int(obs_cfg.get("port") or OBS_PORT)
+        except (TypeError, ValueError):
+            port = OBS_PORT
+
+        password = obs_cfg.get("password") or OBS_PASSWORD or ""
+
         _obs_req_client = obs.ReqClient(
-            host=OBS_HOST,
-            port=OBS_PORT,
-            password=OBS_PASSWORD,
+            host=host,
+            port=port,
+            password=password,
             timeout=5
         )
-        print("OBS ReqClient connected", flush=True)
+
+        print(
+            f"OBS ReqClient connected: {host}:{port}",
+            flush=True
+        )
 
     return _obs_req_client
-
 
 def obs_reset_client():
     global _obs_req_client
@@ -1497,10 +1512,22 @@ def start_obs_meter_client():
             return True
 
         try:
+            settings = settings_load()
+            obs_cfg = settings.get("obs", {})
+
+            host = str(obs_cfg.get("host") or OBS_HOST).strip()
+
+            try:
+                port = int(obs_cfg.get("port") or OBS_PORT)
+            except (TypeError, ValueError):
+                port = OBS_PORT
+
+            password = obs_cfg.get("password") or OBS_PASSWORD or ""
+
             client = obs.EventClient(
-                host=OBS_HOST,
-                port=OBS_PORT,
-                password=OBS_PASSWORD,
+                host=host,
+                port=port,
+                password=password,
                 subs=Subs.INPUTVOLUMEMETERS
             )
 
@@ -1593,7 +1620,7 @@ async def websocket_obs_audio(websocket: WebSocket):
 
     obs_meter_clients.add(websocket)
 
-    start_obs_meter_client()
+    await asyncio.to_thread(start_obs_meter_client)
 
     if obs_meter_watchdog_task is None or obs_meter_watchdog_task.done():
         obs_meter_watchdog_task = asyncio.create_task(
