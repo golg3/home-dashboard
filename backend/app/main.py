@@ -2156,6 +2156,99 @@ def settings_clean_string(value, max_length=1024):
     return value
 
 
+
+def kick_resolve_channel(channel):
+    """
+    Kick kanal adı veya URL'sinden channel_id ve chatroom_id bulur.
+    Örnek:
+      naru
+      https://kick.com/naru
+    """
+    import urllib.request
+    import urllib.parse
+
+    channel = settings_clean_string(channel, 255).strip()
+
+    if not channel:
+        raise HTTPException(
+            status_code=400,
+            detail="Kick kanal adı boş olamaz"
+        )
+
+    # URL verilmişse slug'ı çıkar.
+    if "://" in channel:
+        try:
+            parsed = urllib.parse.urlparse(channel)
+            channel = parsed.path.strip("/").split("/")[0]
+        except Exception:
+            pass
+
+    channel = channel.strip().strip("/")
+
+    if not channel:
+        raise HTTPException(
+            status_code=400,
+            detail="Kick kanal adı geçersiz"
+        )
+
+    url = (
+        "https://kick.com/api/v2/channels/"
+        + urllib.parse.quote(channel)
+    )
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=10
+        ) as response:
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
+
+    except Exception as e:
+        print(
+            "Kick channel lookup error:",
+            repr(e),
+            flush=True
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Kick kanal bilgisi alınamadı"
+        )
+
+    channel_id = data.get("id")
+
+    chatroom = data.get("chatroom") or {}
+    chatroom_id = chatroom.get("id")
+
+    if not channel_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Kick Channel ID bulunamadı"
+        )
+
+    if not chatroom_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Kick Chatroom ID bulunamadı"
+        )
+
+    return {
+        "channel": channel,
+        "channel_id": int(channel_id),
+        "chatroom_id": int(chatroom_id)
+    }
+
+
+
 def settings_apply_update(current, incoming):
     if not isinstance(incoming, dict):
         raise HTTPException(
@@ -2174,6 +2267,18 @@ def settings_apply_update(current, incoming):
     }
 
     result = settings_deep_copy(current)
+
+    # Kick için kullanıcı sadece kanal adı / URL girer.
+    # Channel ID ve Chatroom ID otomatik bulunur.
+    kick_incoming = incoming.get("kick")
+
+    if isinstance(kick_incoming, dict) and "channel" in kick_incoming:
+        resolved_kick = kick_resolve_channel(
+            kick_incoming.get("channel")
+        )
+
+        incoming = settings_deep_copy(incoming)
+        incoming["kick"] = resolved_kick
 
     for section, values in incoming.items():
         if section not in allowed_sections:

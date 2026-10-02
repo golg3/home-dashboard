@@ -858,7 +858,7 @@ body{margin:0;background:#06111c;color:#e9f2ff;font:14px system-ui,Segoe UI,sans
  <div class="settingsSectionHeader">
   <div>
    <div class="settingsSectionTitle">Kick Chat</div>
-   <div class="settingsSectionSub">Kick kanal ve chatroom bilgileri</div>
+   <div class="settingsSectionSub">Kanal adı yeterlidir — ID bilgileri otomatik bulunur</div>
   </div>
  </div>
 
@@ -869,15 +869,6 @@ body{margin:0;background:#06111c;color:#e9f2ff;font:14px system-ui,Segoe UI,sans
           placeholder="golg3 veya https://kick.com/golg3">
   </div>
 
-  <div class="settingsField">
-   <label>Channel ID</label>
-   <input id="settingsKickChannelId" class="settingsInput" inputmode="numeric">
-  </div>
-
-  <div class="settingsField">
-   <label>Chatroom ID</label>
-   <input id="settingsKickChatroomId" class="settingsInput" inputmode="numeric">
-  </div>
  </div>
 </div>
 
@@ -1837,7 +1828,7 @@ startYouTubeChat();
 <script>
 /* KICK LIVE CHAT */
 
-const KICK_CHATROOM_ID = 26837501;
+let KICK_CHATROOM_ID = null;
 const KICK_PUSHER_KEY = "32cbd69e4b950bf97679";
 
 let kickSocket = null;
@@ -1982,11 +1973,57 @@ function kickScheduleReconnect(){
  },3000);
 }
 
-function connectKickChat(){
+async function connectKickChat(){
  clearTimeout(kickReconnectTimer);
  clearInterval(kickPingTimer);
 
  kickIntentionalClose=false;
+
+ try{
+  const settingsResponse=await fetch(
+   "/api/settings",
+   {cache:"no-store"}
+  );
+
+  if(!settingsResponse.ok){
+   throw new Error(
+    "Settings HTTP "+settingsResponse.status
+   );
+  }
+
+  const settingsData=await settingsResponse.json();
+  const kickSettings=
+   settingsData.settings?.kick || {};
+
+  KICK_CHATROOM_ID=
+   Number(kickSettings.chatroom_id) || null;
+
+  if(!KICK_CHATROOM_ID){
+   kickSetStatus("● Kanal Ayarı Eksik",false);
+   kickShowEmpty(
+    "Kick Chatroom ID bulunamadı. Ayarlardan kanal adını kaydet."
+   );
+   return;
+  }
+
+ }catch(error){
+  console.error(
+   "Kick settings:",
+   error
+  );
+
+  kickSetStatus(
+   "● Ayar Hatası",
+   false
+  );
+
+  kickShowEmpty(
+   "Kick kanal ayarları alınamadı."
+  );
+
+  kickScheduleReconnect();
+  return;
+ }
 
  if(
   kickSocket &&
@@ -2160,8 +2197,6 @@ async function loadDashboardSettings(){
   );
 
   settingsValue("settingsKickChannel",kick.channel);
-  settingsValue("settingsKickChannelId",kick.channel_id);
-  settingsValue("settingsKickChatroomId",kick.chatroom_id);
 
   settingsValue("settingsWeatherLocation",weather.location);
   settingsValue("settingsWeatherLat",weather.latitude);
@@ -2263,13 +2298,7 @@ async function saveDashboardSettings(){
 
    kick:{
     channel:
-     document.getElementById("settingsKickChannel").value.trim(),
-
-    channel_id:
-     settingsNumberOrNull("settingsKickChannelId"),
-
-    chatroom_id:
-     settingsNumberOrNull("settingsKickChatroomId")
+     document.getElementById("settingsKickChannel").value.trim()
    },
 
    weather:{
