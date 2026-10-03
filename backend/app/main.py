@@ -2,7 +2,8 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from collections import deque
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from urllib.request import urlopen, Request
 from urllib.parse import urlencode
 import json
@@ -91,7 +92,10 @@ def ingest(
         raise HTTPException(401, "invalid token")
 
     d = m.model_dump()
-    d["timestamp"] = d["timestamp"] or datetime.now().isoformat()
+
+    # Agent'in kendi saatine/saat dilimine guvenmek yerine
+    # metrigin sunucuya ulastigi ani timezone-aware UTC olarak kaydet.
+    d["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     latest.update(d)
     history.append(d)
@@ -118,8 +122,16 @@ def get_metrics():
 
     try:
         last_seen = datetime.fromisoformat(timestamp)
+        # Timestamp timezone bilgisi içeriyorsa aynı timezone ile karşılaştır.
+        if last_seen.tzinfo is not None:
+            now = datetime.now(timezone.utc)
+            last_seen = last_seen.astimezone(timezone.utc)
+        else:
+            # Eski agent verileri timezone bilgisi içermeyebilir.
+            now = datetime.now()
+
         age_seconds = (
-            datetime.now() - last_seen
+            now - last_seen
         ).total_seconds()
 
         result["online"] = age_seconds <= 15
@@ -518,281 +530,240 @@ def calculate_cpu(stats):
 @app.get("/api/docker/containers")
 def docker_containers():
 
+    def collect_container(c):
+
+        cid = c["Id"]
+
+        name = (
+            c.get("Names", ["unknown"])[0]
+            .lstrip("/")
+        )
+
+        state = c.get(
+            "State",
+            "unknown"
+        )
+
+        status = c.get(
+            "Status",
+            ""
+        )
+
+        image = c.get(
+            "Image",
+            ""
+        )
+
+        health = None
+        started_at = ""
+        ips = []
+
+        # Inspect bilgileri
+        try:
+            inspect = docker_request(
+                f"/containers/{cid}/json"
+            )
+
+            health = (
+                inspect
+                .get("State", {})
+                .get("Health", {})
+                .get("Status")
+            )
+
+            started_at = (
+                inspect
+                .get("State", {})
+                .get("StartedAt", "")
+            )
+
+            networks = (
+                inspect
+                .get("NetworkSettings", {})
+                .get("Networks", {})
+            )
+
+            for network_name, network in networks.items():
+
+                ip = network.get("IPAddress")
+
+                if ip:
+                    ips.append({
+                        "network": network_name,
+                        "ip": ip
+                    })
+
+        except Exception:
+            pass
+
+        # Port bilgileri zaten /containers/json cevabında var.
+        ports = []
+
+        for port in c.get("Ports", []):
+
+            private_port = port.get(
+                "PrivatePort"
+            )
+
+            public_port = port.get(
+                "PublicPort"
+            )
+
+            protocol = port.get(
+                "Type",
+                "tcp"
+            )
+
+            if public_port:
+                ports.append(
+                    f"{public_port}:{private_port}/{protocol}"
+                )
+            else:
+                ports.append(
+                    f"{private_port}/{protocol}"
+                )
+
+        cpu_percent = 0
+        memory_usage = 0
+        memory_limit = 0
+        memory_percent = 0
+        net_rx = 0
+        net_tx = 0
+
+        # Stats sadece çalışan container için alınır.
+        if state == "running":
+
+            try:
+                stats = docker_request(
+                    f"/containers/{cid}/stats?stream=false"
+                )
+
+                cpu_percent = calculate_cpu(
+                    stats
+                )
+
+                memory_stats = stats.get(
+                    "memory_stats",
+                    {}
+                )
+
+                memory_usage = memory_stats.get(
+                    "usage",
+                    0
+                )
+
+                memory_limit = memory_stats.get(
+                    "limit",
+                    0
+                )
+
+                if memory_limit:
+                    memory_percent = (
+                        memory_usage /
+                        memory_limit *
+                        100
+                    )
+
+                for net in (
+                    stats
+                    .get("networks", {})
+                    .values()
+                ):
+                    net_rx += net.get(
+                        "rx_bytes",
+                        0
+                    )
+
+                    net_tx += net.get(
+                        "tx_bytes",
+                        0
+                    )
+
+            except Exception:
+                pass
+
+        return {
+            "id": cid[:12],
+            "name": name,
+            "image": image,
+            "state": state,
+            "status": status,
+            "health": health,
+            "started_at": started_at,
+
+            "cpu": round(
+                cpu_percent,
+                2
+            ),
+
+            "memory_usage":
+                memory_usage,
+
+            "memory_limit":
+                memory_limit,
+
+            "memory_percent": round(
+                memory_percent,
+                1
+            ),
+
+            "memory_usage_text":
+                format_bytes(
+                    memory_usage
+                ),
+
+            "memory_limit_text":
+                format_bytes(
+                    memory_limit
+                ),
+
+            "network_rx":
+                net_rx,
+
+            "network_tx":
+                net_tx,
+
+            "network_rx_text":
+                format_bytes(
+                    net_rx
+                ),
+
+            "network_tx_text":
+                format_bytes(
+                    net_tx
+                ),
+
+            "ips": ips,
+            "ports": ports
+        }
+
     try:
 
         containers = docker_request(
             "/containers/json?all=1"
         )
 
-        result = []
+        if not containers:
+            return []
 
-        for c in containers:
+        # Inspect ve stats çağrılarını container başına paralel çalıştır.
+        # Çok fazla eşzamanlı Docker Engine isteği oluşturmamak için
+        # worker sayısını 8 ile sınırla.
+        worker_count = min(
+            8,
+            len(containers)
+        )
 
-            cid = c["Id"]
+        with ThreadPoolExecutor(
+            max_workers=worker_count
+        ) as executor:
 
-            name = (
-                c.get("Names", ["unknown"])[0]
-                .lstrip("/")
-            )
-
-            state = c.get(
-                "State",
-                "unknown"
-            )
-
-            status = c.get(
-                "Status",
-                ""
-            )
-
-            image = c.get(
-                "Image",
-                ""
-            )
-
-
-            inspect = docker_request(
-                f"/containers/{cid}/json"
-            )
-
-
-            health = (
-                inspect
-                .get("State", {})
-                .get("Health", {})
-                .get(
-                    "Status",
-                    None
+            result = list(
+                executor.map(
+                    collect_container,
+                    containers
                 )
             )
-
-
-            started_at = (
-                inspect
-                .get("State", {})
-                .get(
-                    "StartedAt",
-                    ""
-                )
-            )
-
-
-            networks = (
-                inspect
-                .get(
-                    "NetworkSettings",
-                    {}
-                )
-                .get(
-                    "Networks",
-                    {}
-                )
-            )
-
-
-            ips = []
-
-            for network_name, network in networks.items():
-
-                ip = network.get(
-                    "IPAddress"
-                )
-
-                if ip:
-
-                    ips.append({
-                        "network":
-                            network_name,
-
-                        "ip":
-                            ip
-                    })
-
-
-            ports = []
-
-            for p in c.get(
-                "Ports",
-                []
-            ):
-
-                private_port = p.get(
-                    "PrivatePort"
-                )
-
-                public_port = p.get(
-                    "PublicPort"
-                )
-
-                protocol = p.get(
-                    "Type",
-                    "tcp"
-                )
-
-                if public_port:
-
-                    ports.append(
-                        f"{public_port}:{private_port}/{protocol}"
-                    )
-
-                else:
-
-                    ports.append(
-                        f"{private_port}/{protocol}"
-                    )
-
-
-            cpu_percent = 0
-            memory_usage = 0
-            memory_limit = 0
-            memory_percent = 0
-
-            net_rx = 0
-            net_tx = 0
-
-
-            if state == "running":
-
-                try:
-
-                    stats = docker_request(
-                        f"/containers/{cid}/stats?stream=false"
-                    )
-
-                    cpu_percent = calculate_cpu(
-                        stats
-                    )
-
-
-                    memory_stats = stats.get(
-                        "memory_stats",
-                        {}
-                    )
-
-                    memory_usage = (
-                        memory_stats
-                        .get(
-                            "usage",
-                            0
-                        )
-                    )
-
-                    memory_limit = (
-                        memory_stats
-                        .get(
-                            "limit",
-                            0
-                        )
-                    )
-
-
-                    if memory_limit:
-
-                        memory_percent = (
-                            memory_usage /
-                            memory_limit *
-                            100
-                        )
-
-
-                    for net in (
-                        stats
-                        .get(
-                            "networks",
-                            {}
-                        )
-                        .values()
-                    ):
-
-                        net_rx += net.get(
-                            "rx_bytes",
-                            0
-                        )
-
-                        net_tx += net.get(
-                            "tx_bytes",
-                            0
-                        )
-
-                except Exception:
-                    pass
-
-
-            result.append({
-
-                "id":
-                    cid[:12],
-
-                "name":
-                    name,
-
-                "image":
-                    image,
-
-                "state":
-                    state,
-
-                "status":
-                    status,
-
-                "health":
-                    health,
-
-                "started_at":
-                    started_at,
-
-                "cpu":
-                    round(
-                        cpu_percent,
-                        2
-                    ),
-
-                "memory_usage":
-                    memory_usage,
-
-                "memory_limit":
-                    memory_limit,
-
-                "memory_percent":
-                    round(
-                        memory_percent,
-                        1
-                    ),
-
-                "memory_usage_text":
-                    format_bytes(
-                        memory_usage
-                    ),
-
-                "memory_limit_text":
-                    format_bytes(
-                        memory_limit
-                    ),
-
-                "network_rx":
-                    net_rx,
-
-                "network_tx":
-                    net_tx,
-
-                "network_rx_text":
-                    format_bytes(
-                        net_rx
-                    ),
-
-                "network_tx_text":
-                    format_bytes(
-                        net_tx
-                    ),
-
-                "ips":
-                    ips,
-
-                "ports":
-                    ports
-
-            })
-
 
         result.sort(
             key=lambda x: (
@@ -801,9 +772,7 @@ def docker_containers():
             )
         )
 
-
         return result
-
 
     except Exception as e:
 
