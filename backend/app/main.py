@@ -101,7 +101,36 @@ def ingest(
 
 @app.get("/api/metrics")
 def get_metrics():
-    return latest
+    if not latest:
+        return {
+            "online": False,
+            "stale": True
+        }
+
+    result = dict(latest)
+
+    timestamp = result.get("timestamp")
+
+    if not timestamp:
+        result["online"] = False
+        result["stale"] = True
+        return result
+
+    try:
+        last_seen = datetime.fromisoformat(timestamp)
+        age_seconds = (
+            datetime.now() - last_seen
+        ).total_seconds()
+
+        result["online"] = age_seconds <= 15
+        result["stale"] = age_seconds > 15
+        result["age_seconds"] = round(age_seconds, 1)
+
+    except (TypeError, ValueError):
+        result["online"] = False
+        result["stale"] = True
+
+    return result
 
 
 @app.get("/api/history")
@@ -886,6 +915,7 @@ def docker_summary():
 
 import obsws_python as obs
 import base64
+import socket
 
 OBS_HOST = os.getenv("OBS_HOST", "10.29.250.13")
 OBS_PORT = int(os.getenv("OBS_PORT", "4455"))
@@ -896,21 +926,45 @@ _obs_req_client = None
 _obs_req_lock = threading.RLock()
 
 
+def obs_connection_settings():
+    settings = settings_load()
+    obs_cfg = settings.get("obs", {})
+
+    host = str(obs_cfg.get("host") or OBS_HOST).strip()
+
+    try:
+        port = int(obs_cfg.get("port") or OBS_PORT)
+    except (TypeError, ValueError):
+        port = OBS_PORT
+
+    password = obs_cfg.get("password") or OBS_PASSWORD or ""
+
+    return host, port, password
+
+
+def obs_port_available(timeout=0.25):
+    host, port, _ = obs_connection_settings()
+
+    try:
+        with socket.create_connection(
+            (host, port),
+            timeout=timeout
+        ):
+            return True
+    except (OSError, TimeoutError):
+        return False
+
+
 def _obs_connect():
     global _obs_req_client
 
     if _obs_req_client is None:
-        settings = settings_load()
-        obs_cfg = settings.get("obs", {})
+        host, port, password = obs_connection_settings()
 
-        host = str(obs_cfg.get("host") or OBS_HOST).strip()
-
-        try:
-            port = int(obs_cfg.get("port") or OBS_PORT)
-        except (TypeError, ValueError):
-            port = OBS_PORT
-
-        password = obs_cfg.get("password") or OBS_PASSWORD or ""
+        if not obs_port_available():
+            raise ConnectionError(
+                f"OBS çevrimdışı: {host}:{port}"
+            )
 
         _obs_req_client = obs.ReqClient(
             host=host,

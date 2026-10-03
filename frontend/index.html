@@ -1109,7 +1109,30 @@ document.querySelectorAll(".nav div").forEach(item=>item.addEventListener("click
 function card(name,p,color,sub,lines){p=Number(p||0);return `<div class="card metric"><div><div class="title">${name}</div><div class="ring" style="--p:${p};--c:${color}"><span>${Math.round(p)}%</span></div><div class="small">${sub||""}</div></div><div class="details">${lines}</div></div>`}
 async function refresh(){
  try{
-  const r=await fetch("/api/metrics",{cache:"no-store"}),d=await r.json(); if(!d.hostname)return;
+  const r=await fetch("/api/metrics",{cache:"no-store"}),d=await r.json();
+
+  if(!r.ok || !d.hostname || d.online===false){
+   statusEl.textContent="● Çevrimdışı";
+   statusEl.className="offline";
+   timeEl.textContent=d.timestamp
+    ? new Date(d.timestamp).toLocaleTimeString("tr-TR")
+    : "-";
+
+   topProcesses.innerHTML='<div class="card placeholder">Windows Agent çevrimdışı</div>';
+
+   document.getElementById("ct").textContent="-";
+   document.getElementById("gt").textContent="-";
+   document.getElementById("disk").textContent="-";
+   document.getElementById("down").textContent="-";
+   document.getElementById("dp").textContent="-";
+   document.getElementById("db").style.width="0%";
+   document.getElementById("nd").textContent="-";
+   document.getElementById("nu").textContent="-";
+   document.getElementById("uptime").textContent="-";
+
+   return;
+  }
+
   statusEl.textContent="● Çevrimiçi"; statusEl.className="online"; timeEl.textContent=new Date(d.timestamp).toLocaleTimeString("tr-TR");
   topProcesses.innerHTML=card("CPU",d.cpu,"#2998ff","",`Sıcaklık <b>${d.cpu_temp??"-"} °C</b>`)+card("RAM",d.ram,"#9a4dff",`${Number(d.ram_used_gb).toFixed(1)} / ${Number(d.ram_total_gb).toFixed(1)} GB`,`Kullanılan <b>${Number(d.ram_used_gb).toFixed(1)} GB</b><br>Boş <b>${(Number(d.ram_total_gb)-Number(d.ram_used_gb)).toFixed(1)} GB</b>`)+card("GPU",d.gpu,"#22df82",d.gpu_name||"",`Sıcaklık <b>${d.gpu_temp??"-"} °C</b>`)+card("VRAM",d.vram,"#ff9418",`${Number(d.vram_used_gb).toFixed(1)} / ${Number(d.vram_total_gb).toFixed(1)} GB`,`Kullanılan <b>${Number(d.vram_used_gb).toFixed(1)} GB</b>`);
   document.getElementById("ct").textContent=(d.cpu_temp??"-")+"°";document.getElementById("gt").textContent=(d.gpu_temp??"-")+"°";document.getElementById("disk").textContent=Math.round(d.disk_percent)+"%";document.getElementById("down").textContent=Number(d.net_down_mbps).toFixed(1);document.getElementById("dp").textContent=Math.round(d.disk_percent)+"%";document.getElementById("db").style.width=d.disk_percent+"%";document.getElementById("nd").textContent=Number(d.net_down_mbps).toFixed(1)+" Mbps";document.getElementById("nu").textContent=Number(d.net_up_mbps).toFixed(1)+" Mbps";document.getElementById("host").textContent=d.hostname;document.getElementById("gname").textContent=d.gpu_name||"-";document.getElementById("uptime").textContent=d.uptime||"-";
@@ -2678,7 +2701,28 @@ async function loadHomePc(){
 
   const d=await r.json();
 
-  if(!d.hostname)throw new Error();
+  if(!d.hostname || d.online===false){
+   homeSetStatus(
+    "homePcStatus",
+    "● Çevrimdışı",
+    false
+   );
+
+   homeSetText("homePcCpu","-");
+   homeSetText("homePcRam","-");
+   homeSetText("homePcGpu","-");
+   homeSetText("homePcTemp","-");
+   homeSetText("homePcNetIn","-");
+   homeSetText("homePcNetOut","-");
+
+   const inBar=document.getElementById("homePcNetInBar");
+   const outBar=document.getElementById("homePcNetOutBar");
+
+   if(inBar)inBar.style.width="0%";
+   if(outBar)outBar.style.width="0%";
+
+   return;
+  }
 
   homeSetStatus(
    "homePcStatus",
