@@ -1911,6 +1911,39 @@ async function pollYouTubeChat(){
    return;
   }
 
+  /*
+   * YouTube günlük API kotası dolduysa backend'in
+   * verdiği retry_after süresine uy. Böylece frontend
+   * her 10 saniyede bir aynı başarısız isteği tekrarlamaz.
+   */
+  if(response.status===429){
+   let retryMs=3600000;
+   let message="YouTube API kotası doldu.";
+
+   try{
+    const errorData=await response.json();
+    const detail=errorData.detail || {};
+
+    if(detail.message)
+     message=detail.message;
+
+    const retrySeconds=Number(detail.retry_after);
+
+    if(Number.isFinite(retrySeconds) && retrySeconds>0)
+     retryMs=retrySeconds*1000;
+
+   }catch(e){}
+
+   youtubeSetStatus("● Kota Doldu",false);
+   youtubeShowEmpty(message);
+
+   youtubeSchedule(
+    Math.max(60000,retryMs)
+   );
+
+   return;
+  }
+
   if(!response.ok){
    throw new Error("HTTP "+response.status);
   }

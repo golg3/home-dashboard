@@ -1737,6 +1737,142 @@ def youtube_service():
     )
 
 
+# =========================================================
+# YOUTUBE LIVE DISCOVERY CACHE
+# =========================================================
+
+_youtube_live_lock = threading.RLock()
+_youtube_live_cache = None
+_youtube_live_cache_until = 0.0
+_youtube_quota_backoff_until = 0.0
+
+# Aktif yayın bulunduğunda keşif sonucunu bu süre boyunca kullan.
+YOUTUBE_LIVE_CACHE_SECONDS = 60
+
+# Yayın yoksa Google API'yi gereksiz yere sürekli sorgulama.
+YOUTUBE_NO_LIVE_CACHE_SECONDS = 30
+
+# Günlük kota dolduğunda sürekli 403 üretmemek için uzun backoff.
+YOUTUBE_QUOTA_BACKOFF_SECONDS = 3600
+
+
+def youtube_is_quota_error(error):
+    text = str(error).lower()
+
+    return (
+        "quotaexceeded" in text
+        or "youtube.quota" in text
+        or "exceeded your" in text and "quota" in text
+    )
+
+
+def youtube_discover_live(youtube, force=False):
+    global _youtube_live_cache
+    global _youtube_live_cache_until
+    global _youtube_quota_backoff_until
+
+    now = time.time()
+
+    with _youtube_live_lock:
+
+        if now < _youtube_quota_backoff_until:
+            retry_after = max(
+                1,
+                int(_youtube_quota_backoff_until - now)
+            )
+
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "youtube_quota_exceeded",
+                    "message": "YouTube API kotası doldu",
+                    "retry_after": retry_after
+                }
+            )
+
+        if (
+            not force
+            and _youtube_live_cache is not None
+            and now < _youtube_live_cache_until
+        ):
+            return _youtube_live_cache
+
+        try:
+            response = youtube.liveBroadcasts().list(
+                part="id,snippet,status",
+                broadcastType="all",
+                mine=True,
+                maxResults=5
+            ).execute()
+
+        except Exception as e:
+
+            if youtube_is_quota_error(e):
+                _youtube_quota_backoff_until = (
+                    time.time()
+                    + YOUTUBE_QUOTA_BACKOFF_SECONDS
+                )
+
+                print(
+                    "YouTube quota exceeded; "
+                    f"backoff {YOUTUBE_QUOTA_BACKOFF_SECONDS}s",
+                    flush=True
+                )
+
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "code": "youtube_quota_exceeded",
+                        "message": "YouTube API kotası doldu",
+                        "retry_after": YOUTUBE_QUOTA_BACKOFF_SECONDS
+                    }
+                )
+
+            raise
+
+        items = [
+            item
+            for item in response.get("items", [])
+            if (
+                item.get("status", {})
+                .get("lifeCycleStatus") == "live"
+            )
+        ]
+
+        if not items:
+            result = {
+                "live": False,
+                "message": "Aktif YouTube yayını bulunamadı"
+            }
+
+            _youtube_live_cache = result
+            _youtube_live_cache_until = (
+                time.time()
+                + YOUTUBE_NO_LIVE_CACHE_SECONDS
+            )
+
+            return result
+
+        broadcast = items[0]
+        snippet = broadcast.get("snippet", {})
+
+        result = {
+            "live": True,
+            "broadcast_id": broadcast.get("id"),
+            "title": snippet.get("title", ""),
+            "live_chat_id": snippet.get("liveChatId"),
+            "published_at": snippet.get("publishedAt")
+        }
+
+        _youtube_live_cache = result
+        _youtube_live_cache_until = (
+            time.time()
+            + YOUTUBE_LIVE_CACHE_SECONDS
+        )
+
+        return result
+
+
 @app.get("/api/youtube/status")
 def youtube_status():
     creds = youtube_load_credentials()
@@ -1852,34 +1988,7 @@ def youtube_live():
                 detail="YouTube hesabı bağlı değil"
             )
 
-        response = youtube.liveBroadcasts().list(
-            part="id,snippet,status",
-            broadcastType="all",
-            mine=True,
-            maxResults=5
-        ).execute()
-
-        items = [
-            item for item in response.get("items", [])
-            if item.get("status", {}).get("lifeCycleStatus") == "live"
-        ]
-
-        if not items:
-            return {
-                "live": False,
-                "message": "Aktif YouTube yayını bulunamadı"
-            }
-
-        broadcast = items[0]
-        snippet = broadcast.get("snippet", {})
-
-        return {
-            "live": True,
-            "broadcast_id": broadcast.get("id"),
-            "title": snippet.get("title", ""),
-            "live_chat_id": snippet.get("liveChatId"),
-            "published_at": snippet.get("publishedAt")
-        }
+        return youtube_discover_live(youtube)
 
     except HTTPException:
         raise
@@ -1906,32 +2015,22 @@ def youtube_chat(
                 detail="YouTube hesabı bağlı değil"
             )
 
-        # live_chat_id verilmediyse aktif yayından otomatik bul.
+        # live_chat_id verilmediyse ortak aktif yayın
+        # cache'inden otomatik bul.
         if not live_chat_id:
-            broadcasts = youtube.liveBroadcasts().list(
-                part="id,snippet,status",
-                broadcastType="all",
-                mine=True,
-                maxResults=50
-            ).execute()
+            live_info = youtube_discover_live(youtube)
 
-            items = [
-                item for item in broadcasts.get("items", [])
-                if item.get("status", {}).get("lifeCycleStatus") == "live"
-            ]
-
-            if not items:
+            if not live_info.get("live"):
                 return {
                     "live": False,
                     "messages": [],
-                    "message": "Aktif YouTube yayını bulunamadı"
+                    "message": live_info.get(
+                        "message",
+                        "Aktif YouTube yayını bulunamadı"
+                    )
                 }
 
-            live_chat_id = (
-                items[0]
-                .get("snippet", {})
-                .get("liveChatId")
-            )
+            live_chat_id = live_info.get("live_chat_id")
 
             if not live_chat_id:
                 return {
