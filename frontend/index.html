@@ -1212,6 +1212,8 @@ if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js");
 <script>
 let obsPreviewTimer=null;
 let obsStatusTimer=null;
+let obsConnected=false;
+let obsDetailsLoaded=false;
 
 function obsEsc(v){
  return String(v ?? "").replace(/[&<>"']/g,function(c){
@@ -1246,7 +1248,17 @@ async function loadObsStatus(){
   const r=await fetch("/api/obs/status",{cache:"no-store"});
   const d=await r.json();
 
-  if(!d.connected) throw new Error(d.error || "OBS bağlantısı yok");
+  if(!r.ok || !d.connected)
+   throw new Error(d.error || "OBS bağlantısı yok");
+
+  const wasConnected=obsConnected;
+  obsConnected=true;
+
+  /*
+   * Audio meter websocket yalnızca OBS gerçekten
+   * bağlı olduğunda çalışsın.
+   */
+  connectObsAudioMeter();
 
   document.getElementById("obsConnection").textContent="🟢 OBS bağlı";
   document.getElementById("obsCurrentScene").textContent=d.current_scene || "-";
@@ -1261,8 +1273,61 @@ async function loadObsStatus(){
    document.getElementById("obsStop").disabled=true;
   }
 
+  /*
+   * OBS yeni açıldıysa ağır verileri yalnızca bir kez yükle.
+   */
+  if(!wasConnected || !obsDetailsLoaded){
+   obsDetailsLoaded=true;
+
+   await Promise.allSettled([
+    loadObsScenes(),
+    loadObsAudio()
+   ]);
+
+   await loadObsPreview();
+
+   if(!obsPreviewTimer){
+    obsPreviewTimer=setInterval(function(){
+     if(obsConnected)
+      loadObsPreview();
+    },1000);
+   }
+  }
+
+  return true;
+
  }catch(e){
-  document.getElementById("obsConnection").textContent="🔴 OBS bağlantısı yok";
+
+  obsConnected=false;
+  obsDetailsLoaded=false;
+
+  disconnectObsAudioMeter();
+
+  document.getElementById("obsConnection").textContent=
+   "🔴 OBS kapalı / bağlantı yok";
+
+  document.getElementById("obsCurrentScene").textContent="-";
+  document.getElementById("obsLive").textContent="⚫ OBS kapalı";
+
+  document.getElementById("obsStart").disabled=true;
+  document.getElementById("obsStop").disabled=true;
+
+  if(obsPreviewTimer){
+   clearInterval(obsPreviewTimer);
+   obsPreviewTimer=null;
+  }
+
+  const preview=document.getElementById("obsPreview");
+  if(preview)
+   preview.style.display="none";
+
+  const previewText=document.getElementById("obsPreviewText");
+  if(previewText){
+   previewText.style.display="block";
+   previewText.textContent="OBS kapalı";
+  }
+
+  return false;
  }
 }
 
@@ -1340,6 +1405,9 @@ async function loadObsAudio(){
 }
 
 async function loadObsPreview(){
+ if(!obsConnected)
+  return;
+
  try{
   const r=await fetch("/api/obs/screenshot",{cache:"no-store"});
   if(!r.ok) throw new Error();
@@ -1379,19 +1447,21 @@ document.getElementById("obsStop").addEventListener("click",async function(){
 });
 
 async function startObsUI(){
- await Promise.all([
-  loadObsStatus(),
-  loadObsScenes(),
-  loadObsAudio()
- ]);
 
- await loadObsPreview();
+ /*
+  * OBS opsiyoneldir.
+  * İlk olarak sadece bağlantı durumunu kontrol et.
+  * Scenes/audio/preview yalnızca OBS bağlıysa loadObsStatus
+  * tarafından başlatılır.
+  */
+ await loadObsStatus();
 
- if(!obsStatusTimer)
-  obsStatusTimer=setInterval(loadObsStatus,2000);
-
- if(!obsPreviewTimer)
-  obsPreviewTimer=setInterval(loadObsPreview,1000);
+ if(!obsStatusTimer){
+  obsStatusTimer=setInterval(
+   loadObsStatus,
+   2000
+  );
+ }
 }
 
 startObsUI();
@@ -1600,41 +1670,121 @@ function updateAudioMeter(input){
 
 }
 
-function connectObsAudioMeter(){
- if(obsAudioSocket && (obsAudioSocket.readyState===WebSocket.OPEN || obsAudioSocket.readyState===WebSocket.CONNECTING)) return;
+function disconnectObsAudioMeter(){
 
- const protocol=location.protocol==="https:" ? "wss:" : "ws:";
- const url=protocol+"//"+location.host+"/ws/obs/audio";
+ clearTimeout(obsAudioReconnect);
+ obsAudioReconnect=null;
+
+ if(obsAudioSocket){
+  const socket=obsAudioSocket;
+
+  /*
+   * onclose reconnect başlatmasın.
+   */
+  socket.onclose=null;
+  socket.onerror=null;
+
+  obsAudioSocket=null;
+
+  try{
+   socket.close();
+  }catch(e){}
+ }
+}
+
+function connectObsAudioMeter(){
+
+ /*
+  * OBS kapalıysa websocket açma.
+  */
+ if(!obsConnected)
+  return;
+
+ if(
+  obsAudioSocket &&
+  (
+   obsAudioSocket.readyState===WebSocket.OPEN ||
+   obsAudioSocket.readyState===WebSocket.CONNECTING
+  )
+ ){
+  return;
+ }
+
+ clearTimeout(obsAudioReconnect);
+ obsAudioReconnect=null;
+
+ const protocol=
+  location.protocol==="https:" ? "wss:" : "ws:";
+
+ const url=
+  protocol+"//"+location.host+"/ws/obs/audio";
 
  obsAudioSocket=new WebSocket(url);
 
  obsAudioSocket.onopen=function(){
+
+  /*
+   * Socket açılırken OBS kapanmışsa hemen temizle.
+   */
+  if(!obsConnected){
+   disconnectObsAudioMeter();
+   return;
+  }
+
   console.log("OBS audio meter connected");
-  obsAudioSocket.send("hello");
+
+  try{
+   obsAudioSocket.send("hello");
+  }catch(e){}
  };
 
  obsAudioSocket.onmessage=function(event){
+
+  if(!obsConnected)
+   return;
+
   try{
    const data=JSON.parse(event.data);
-   if(data.type!=="audio_meter") return;
+
+   if(data.type!=="audio_meter")
+    return;
+
    (data.inputs || []).forEach(updateAudioMeter);
+
   }catch(e){
    console.error("OBS audio meter:",e);
   }
  };
 
  obsAudioSocket.onclose=function(){
+
   obsAudioSocket=null;
+
   clearTimeout(obsAudioReconnect);
-  obsAudioReconnect=setTimeout(connectObsAudioMeter,2000);
+  obsAudioReconnect=null;
+
+  /*
+   * Yalnızca OBS hâlâ bağlı görünüyorsa reconnect et.
+   */
+  if(obsConnected){
+   obsAudioReconnect=setTimeout(
+    connectObsAudioMeter,
+    2000
+   );
+  }
  };
 
  obsAudioSocket.onerror=function(){
-  try{obsAudioSocket.close();}catch(e){}
+  try{
+   obsAudioSocket.close();
+  }catch(e){}
  };
 }
 
-connectObsAudioMeter();
+/*
+ * Burada artık koşulsuz connect YOK.
+ * loadObsStatus() OBS'yi bağlı gördüğünde başlatacak.
+ */
 </script>
 
 
@@ -3045,6 +3195,12 @@ setTimeout(function(){
 async function loadHomeObsAudio(){
  const el=document.getElementById("homeObsAudio");
  if(!el)return;
+
+ if(!obsConnected){
+  el.innerHTML=
+   '<div class="small">OBS kapalı / bağlantı yok.</div>';
+  return;
+ }
 
  try{
   const r=await fetch("/api/obs/audio",{cache:"no-store"});

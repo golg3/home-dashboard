@@ -967,6 +967,14 @@ class OBSClientProxy:
             global _obs_req_client
 
             with _obs_req_lock:
+                # Cached ReqClient mevcut olsa bile OBS sonradan
+                # kapanmış olabilir. Bu kontrol try dışında:
+                # OBS kapalıysa reconnect yoluna girip ikinci kez
+                # bağlantı denemesi yapma.
+                if not obs_port_available(timeout=0.20):
+                    obs_reset_client()
+                    raise ConnectionError("OBS çevrimdışı")
+
                 try:
                     client = _obs_connect()
                     method = getattr(client, name)
