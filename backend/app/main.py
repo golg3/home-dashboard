@@ -1685,14 +1685,47 @@ async def websocket_obs_audio(websocket: WebSocket):
 # YOUTUBE OAUTH / LIVE CHAT
 # ---------------------------------------------------------
 
+def youtube_oauth_settings():
+    """
+    YouTube OAuth ayarlarını dashboard settings.json içinden alır.
+    settings.json içinde değer yoksa eski .env değerleri fallback
+    olarak kullanılmaya devam eder.
+    """
+    settings = settings_load()
+    youtube_cfg = settings.get("youtube") or {}
+
+    client_id = (
+        str(youtube_cfg.get("client_id") or "").strip()
+        or YOUTUBE_CLIENT_ID
+    )
+
+    client_secret = (
+        str(youtube_cfg.get("client_secret") or "").strip()
+        or YOUTUBE_CLIENT_SECRET
+    )
+
+    redirect_uri = (
+        str(youtube_cfg.get("redirect_uri") or "").strip()
+        or YOUTUBE_REDIRECT_URI
+    )
+
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri
+    }
+
+
 def youtube_client_config():
+    cfg = youtube_oauth_settings()
+
     return {
         "web": {
-            "client_id": YOUTUBE_CLIENT_ID,
-            "client_secret": YOUTUBE_CLIENT_SECRET,
+            "client_id": cfg["client_id"],
+            "client_secret": cfg["client_secret"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [YOUTUBE_REDIRECT_URI],
+            "redirect_uris": [cfg["redirect_uri"]],
         }
     }
 
@@ -1754,6 +1787,33 @@ YOUTUBE_NO_LIVE_CACHE_SECONDS = 30
 
 # Günlük kota dolduğunda sürekli 403 üretmemek için uzun backoff.
 YOUTUBE_QUOTA_BACKOFF_SECONDS = 3600
+
+# İzleyici sayısı için ayrı cache.
+# Chat polling'inden bağımsız çalışır.
+_youtube_viewer_lock = threading.RLock()
+_youtube_viewer_cache = None
+_youtube_viewer_cache_until = 0.0
+
+YOUTUBE_VIEWER_CACHE_SECONDS = 60
+
+# =========================================================
+# YOUTUBE CHAT SHARED POLLING STATE
+# =========================================================
+#
+# Google YouTube API'ye polling browser tarafında değil,
+# backend tarafında tek zincir halinde yapılır.
+#
+# Böylece birden fazla dashboard istemcisi açık olsa bile
+# her istemci ayrı liveChatMessages.list() çağrısı üretmez.
+#
+_youtube_chat_lock = threading.RLock()
+_youtube_chat_live_chat_id = None
+_youtube_chat_next_page_token = None
+_youtube_chat_messages = []
+_youtube_chat_next_poll_at = 0.0
+_youtube_chat_polling_interval_ms = 5000
+
+YOUTUBE_CHAT_MAX_MESSAGES = 200
 
 
 def youtube_is_quota_error(error):
@@ -1875,13 +1935,14 @@ def youtube_discover_live(youtube, force=False):
 
 @app.get("/api/youtube/status")
 def youtube_status():
+    cfg = youtube_oauth_settings()
     creds = youtube_load_credentials()
 
     return {
         "configured": bool(
-            YOUTUBE_CLIENT_ID
-            and YOUTUBE_CLIENT_SECRET
-            and YOUTUBE_REDIRECT_URI
+            cfg["client_id"]
+            and cfg["client_secret"]
+            and cfg["redirect_uri"]
         ),
         "authenticated": bool(creds)
     }
@@ -1889,7 +1950,13 @@ def youtube_status():
 
 @app.get("/api/youtube/auth")
 def youtube_auth():
-    if not YOUTUBE_CLIENT_ID or not YOUTUBE_CLIENT_SECRET:
+    cfg = youtube_oauth_settings()
+
+    if (
+        not cfg["client_id"]
+        or not cfg["client_secret"]
+        or not cfg["redirect_uri"]
+    ):
         raise HTTPException(
             status_code=500,
             detail="YouTube OAuth yapılandırılmamış"
@@ -1901,7 +1968,7 @@ def youtube_auth():
         autogenerate_code_verifier=False
     )
 
-    flow.redirect_uri = YOUTUBE_REDIRECT_URI
+    flow.redirect_uri = cfg["redirect_uri"]
 
     authorization_url, state = flow.authorization_url(
         access_type="offline",
@@ -1915,13 +1982,25 @@ def youtube_auth():
 @app.get("/api/youtube/callback")
 def youtube_callback(code: str = Query(...)):
     try:
+        cfg = youtube_oauth_settings()
+
+        if (
+            not cfg["client_id"]
+            or not cfg["client_secret"]
+            or not cfg["redirect_uri"]
+        ):
+            raise HTTPException(
+                status_code=500,
+                detail="YouTube OAuth yapılandırılmamış"
+            )
+
         flow = Flow.from_client_config(
             youtube_client_config(),
             scopes=YOUTUBE_SCOPES,
-        autogenerate_code_verifier=False
+            autogenerate_code_verifier=False
         )
 
-        flow.redirect_uri = YOUTUBE_REDIRECT_URI
+        flow.redirect_uri = cfg["redirect_uri"]
         flow.fetch_token(code=code)
 
         creds = flow.credentials
@@ -1931,51 +2010,243 @@ def youtube_callback(code: str = Query(...)):
             exist_ok=True
         )
 
-        with open(YOUTUBE_TOKEN_FILE, "w") as f:
+        with open(
+            YOUTUBE_TOKEN_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
             f.write(creds.to_json())
 
         return HTMLResponse("""
-        <!doctype html>
-        <html lang="tr">
-        <head>
-        <meta charset="utf-8">
-        <title>YouTube Bağlandı</title>
-        <style>
-        body{
-            background:#06111b;
-            color:#d8e5f2;
-            font-family:Arial,sans-serif;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            min-height:100vh;
-        }
-        .box{
-            background:#0b1c29;
-            border:1px solid #173149;
-            border-radius:18px;
-            padding:30px;
-            text-align:center;
-        }
-        h2{color:#22df82}
-        </style>
-        </head>
-        <body>
-        <div class="box">
-            <h2>✓ YouTube bağlandı</h2>
-            <p>Yetkilendirme tamamlandı.</p>
-            <p>Bu pencereyi kapatabilirsin.</p>
-        </div>
-        </body>
-        </html>
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>YouTube Bağlandı</title>
+
+<style>
+body{
+    background:#06111b;
+    color:#d8e5f2;
+    font-family:Arial,sans-serif;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+    margin:0;
+}
+
+.box{
+    background:#0b1c29;
+    border:1px solid #173149;
+    border-radius:18px;
+    padding:30px;
+    text-align:center;
+}
+
+h2{
+    color:#22df82;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+    <h2>✓ YouTube bağlandı</h2>
+    <p>Yetkilendirme tamamlandı.</p>
+    <p>Bu pencere otomatik kapanacak.</p>
+</div>
+
+<script>
+try{
+    if(window.opener){
+        window.opener.postMessage(
+            {type:"youtube-oauth-success"},
+            window.location.origin
+        );
+    }
+}catch(e){}
+
+setTimeout(function(){
+    window.close();
+},1000);
+</script>
+
+</body>
+</html>
         """)
 
+    except HTTPException:
+        raise
+
     except Exception as e:
-        print("YouTube OAuth callback error:", e, flush=True)
+        print(
+            "YouTube OAuth callback error:",
+            repr(e),
+            flush=True
+        )
+
         raise HTTPException(
             status_code=500,
-            detail=f"YouTube OAuth hatası: {e}"
+            detail="YouTube OAuth işlemi başarısız"
         )
+
+
+@app.post("/api/youtube/disconnect")
+def youtube_disconnect():
+    global _youtube_live_cache
+    global _youtube_live_cache_until
+    global _youtube_quota_backoff_until
+
+    try:
+        if os.path.exists(YOUTUBE_TOKEN_FILE):
+            os.remove(YOUTUBE_TOKEN_FILE)
+
+    except Exception as e:
+        print(
+            "YouTube disconnect error:",
+            repr(e),
+            flush=True
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="YouTube bağlantısı kaldırılamadı"
+        )
+
+    _youtube_live_cache = None
+    _youtube_live_cache_until = 0.0
+    _youtube_quota_backoff_until = 0.0
+
+    return {
+        "ok": True,
+        "authenticated": False
+    }
+
+
+@app.get("/api/youtube/viewers")
+def youtube_viewers():
+    global _youtube_viewer_cache
+    global _youtube_viewer_cache_until
+    global _youtube_quota_backoff_until
+
+    try:
+        youtube = youtube_service()
+
+        if youtube is None:
+            raise HTTPException(
+                status_code=401,
+                detail="YouTube hesabı bağlı değil"
+            )
+
+        # Aktif yayını mevcut ortak cache üzerinden bul.
+        live_info = youtube_discover_live(youtube)
+
+        if not live_info.get("live"):
+            return {
+                "live": False,
+                "viewers": 0
+            }
+
+        broadcast_id = live_info.get("broadcast_id")
+
+        if not broadcast_id:
+            return {
+                "live": True,
+                "viewers": None
+            }
+
+        now = time.time()
+
+        with _youtube_viewer_lock:
+
+            if (
+                _youtube_viewer_cache is not None
+                and now < _youtube_viewer_cache_until
+                and _youtube_viewer_cache.get(
+                    "broadcast_id"
+                ) == broadcast_id
+            ):
+                return _youtube_viewer_cache
+
+            try:
+                response = youtube.videos().list(
+                    part="liveStreamingDetails",
+                    id=broadcast_id
+                ).execute()
+
+            except Exception as e:
+
+                if youtube_is_quota_error(e):
+                    _youtube_quota_backoff_until = (
+                        time.time()
+                        + YOUTUBE_QUOTA_BACKOFF_SECONDS
+                    )
+
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "code":
+                                "youtube_quota_exceeded",
+                            "message":
+                                "YouTube API kotası doldu",
+                            "retry_after":
+                                YOUTUBE_QUOTA_BACKOFF_SECONDS
+                        }
+                    )
+
+                raise
+
+            items=response.get("items", [])
+
+            viewers=None
+
+            if items:
+                details=items[0].get(
+                    "liveStreamingDetails",
+                    {}
+                )
+
+                raw_viewers=details.get(
+                    "concurrentViewers"
+                )
+
+                if raw_viewers is not None:
+                    try:
+                        viewers=int(raw_viewers)
+                    except (TypeError,ValueError):
+                        viewers=None
+
+            result={
+                "live": True,
+                "broadcast_id": broadcast_id,
+                "viewers": viewers
+            }
+
+            _youtube_viewer_cache=result
+            _youtube_viewer_cache_until=(
+                time.time()
+                + YOUTUBE_VIEWER_CACHE_SECONDS
+            )
+
+            return result
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(
+            "YouTube viewers error:",
+            repr(e),
+            flush=True
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="YouTube izleyici sayısı alınamadı"
+        )
+
 
 @app.get("/api/youtube/live")
 def youtube_live():
@@ -2002,10 +2273,14 @@ def youtube_live():
 
 
 @app.get("/api/youtube/chat")
-def youtube_chat(
-    live_chat_id: str | None = Query(default=None),
-    page_token: str | None = Query(default=None)
-):
+def youtube_chat():
+    global _youtube_chat_live_chat_id
+    global _youtube_chat_next_page_token
+    global _youtube_chat_messages
+    global _youtube_chat_next_poll_at
+    global _youtube_chat_polling_interval_ms
+    global _youtube_quota_backoff_until
+
     try:
         youtube = youtube_service()
 
@@ -2015,105 +2290,272 @@ def youtube_chat(
                 detail="YouTube hesabı bağlı değil"
             )
 
-        # live_chat_id verilmediyse ortak aktif yayın
-        # cache'inden otomatik bul.
-        if not live_chat_id:
-            live_info = youtube_discover_live(youtube)
+        now = time.time()
 
-            if not live_info.get("live"):
-                return {
-                    "live": False,
-                    "messages": [],
-                    "message": live_info.get(
-                        "message",
-                        "Aktif YouTube yayını bulunamadı"
-                    )
+        # -------------------------------------------------
+        # Ortak YouTube kota backoff kontrolü.
+        # -------------------------------------------------
+        if now < _youtube_quota_backoff_until:
+            retry_after = max(
+                1,
+                int(_youtube_quota_backoff_until - now)
+            )
+
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "youtube_quota_exceeded",
+                    "message": "YouTube API kotası doldu",
+                    "retry_after": retry_after
                 }
+            )
 
-            live_chat_id = live_info.get("live_chat_id")
+        # -------------------------------------------------
+        # Aktif yayını ortak discovery cache üzerinden bul.
+        # -------------------------------------------------
+        live_info = youtube_discover_live(youtube)
 
-            if not live_chat_id:
+        if not live_info.get("live"):
+            with _youtube_chat_lock:
+                _youtube_chat_live_chat_id = None
+                _youtube_chat_next_page_token = None
+                _youtube_chat_messages = []
+                _youtube_chat_next_poll_at = 0.0
+                _youtube_chat_polling_interval_ms = 5000
+
+            return {
+                "live": False,
+                "messages": [],
+                "message": live_info.get(
+                    "message",
+                    "Aktif YouTube yayını bulunamadı"
+                )
+            }
+
+        live_chat_id = live_info.get("live_chat_id")
+
+        if not live_chat_id:
+            return {
+                "live": True,
+                "chat_available": False,
+                "messages": [],
+                "message": "Canlı sohbet kullanılamıyor"
+            }
+
+        with _youtube_chat_lock:
+
+            now = time.time()
+
+            # -------------------------------------------------
+            # Yeni yayın/chat başladıysa eski state'i temizle.
+            # -------------------------------------------------
+            if _youtube_chat_live_chat_id != live_chat_id:
+                _youtube_chat_live_chat_id = live_chat_id
+                _youtube_chat_next_page_token = None
+                _youtube_chat_messages = []
+                _youtube_chat_next_poll_at = 0.0
+                _youtube_chat_polling_interval_ms = 5000
+
+            # -------------------------------------------------
+            # Google'ın önerdiği polling süresi henüz dolmadıysa
+            # Google'a gitmeden mevcut cache'i döndür.
+            # -------------------------------------------------
+            if now < _youtube_chat_next_poll_at:
                 return {
                     "live": True,
-                    "chat_available": False,
-                    "messages": [],
-                    "message": "Canlı sohbet kullanılamıyor"
+                    "chat_available": True,
+                    "live_chat_id":
+                        _youtube_chat_live_chat_id,
+                    "polling_interval_ms":
+                        _youtube_chat_polling_interval_ms,
+                    "messages":
+                        list(_youtube_chat_messages)
                 }
 
-        kwargs = {
-            "liveChatId": live_chat_id,
-            "part": "id,snippet,authorDetails",
-            "maxResults": 200
-        }
+            kwargs = {
+                "liveChatId": live_chat_id,
+                "part": "id,snippet,authorDetails",
+                "maxResults": 200
+            }
 
-        if page_token:
-            kwargs["pageToken"] = page_token
-
-        response = youtube.liveChatMessages().list(
-            **kwargs
-        ).execute()
-
-        messages = []
-
-        for item in response.get("items", []):
-            snippet = item.get("snippet", {})
-            author = item.get("authorDetails", {})
-
-            messages.append({
-                "id": item.get("id"),
-                "author": author.get("displayName", ""),
-                "author_channel_id": author.get(
-                    "channelId",
-                    ""
-                ),
-                "avatar": author.get(
-                    "profileImageUrl",
-                    ""
-                ),
-                "message": snippet.get(
-                    "displayMessage",
-                    ""
-                ),
-                "published_at": snippet.get(
-                    "publishedAt"
-                ),
-                "is_owner": author.get(
-                    "isChatOwner",
-                    False
-                ),
-                "is_moderator": author.get(
-                    "isChatModerator",
-                    False
-                ),
-                "is_member": author.get(
-                    "isChatSponsor",
-                    False
+            if _youtube_chat_next_page_token:
+                kwargs["pageToken"] = (
+                    _youtube_chat_next_page_token
                 )
-            })
 
-        return {
-            "live": True,
-            "chat_available": True,
-            "live_chat_id": live_chat_id,
-            "polling_interval_ms": response.get(
-                "pollingIntervalMillis",
-                5000
-            ),
-            "next_page_token": response.get(
+            try:
+                response = (
+                    youtube
+                    .liveChatMessages()
+                    .list(**kwargs)
+                    .execute()
+                )
+
+            except Exception as e:
+
+                if youtube_is_quota_error(e):
+                    _youtube_quota_backoff_until = (
+                        time.time()
+                        + YOUTUBE_QUOTA_BACKOFF_SECONDS
+                    )
+
+                    print(
+                        "YouTube chat quota exceeded; "
+                        f"backoff "
+                        f"{YOUTUBE_QUOTA_BACKOFF_SECONDS}s",
+                        flush=True
+                    )
+
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "code":
+                                "youtube_quota_exceeded",
+                            "message":
+                                "YouTube API kotası doldu",
+                            "retry_after":
+                                YOUTUBE_QUOTA_BACKOFF_SECONDS
+                        }
+                    )
+
+                raise
+
+            messages = []
+
+            for item in response.get("items", []):
+                snippet = item.get("snippet", {})
+                author = item.get(
+                    "authorDetails",
+                    {}
+                )
+
+                messages.append({
+                    "id": item.get("id"),
+                    "author": author.get(
+                        "displayName",
+                        ""
+                    ),
+                    "author_channel_id": author.get(
+                        "channelId",
+                        ""
+                    ),
+                    "avatar": author.get(
+                        "profileImageUrl",
+                        ""
+                    ),
+                    "message": snippet.get(
+                        "displayMessage",
+                        ""
+                    ),
+                    "published_at": snippet.get(
+                        "publishedAt"
+                    ),
+                    "is_owner": author.get(
+                        "isChatOwner",
+                        False
+                    ),
+                    "is_moderator": author.get(
+                        "isChatModerator",
+                        False
+                    ),
+                    "is_member": author.get(
+                        "isChatSponsor",
+                        False
+                    )
+                })
+
+            # -------------------------------------------------
+            # ID bazlı duplicate engelleme.
+            # -------------------------------------------------
+            existing = {
+                item.get("id")
+                for item in _youtube_chat_messages
+                if item.get("id")
+            }
+
+            for message in messages:
+                message_id = message.get("id")
+
+                if (
+                    message_id
+                    and message_id not in existing
+                ):
+                    _youtube_chat_messages.append(
+                        message
+                    )
+                    existing.add(message_id)
+
+            if (
+                len(_youtube_chat_messages)
+                > YOUTUBE_CHAT_MAX_MESSAGES
+            ):
+                _youtube_chat_messages = (
+                    _youtube_chat_messages[
+                        -YOUTUBE_CHAT_MAX_MESSAGES:
+                    ]
+                )
+
+            next_token = response.get(
                 "nextPageToken"
-            ),
-            "messages": messages
-        }
+            )
+
+            if next_token:
+                _youtube_chat_next_page_token = (
+                    next_token
+                )
+
+            try:
+                interval_ms = int(
+                    response.get(
+                        "pollingIntervalMillis",
+                        5000
+                    )
+                )
+            except (TypeError, ValueError):
+                interval_ms = 5000
+
+            # YouTube daha kısa bir değer döndürse bile
+            # minimum 2 saniye koruma uygula.
+            interval_ms = max(
+                2000,
+                interval_ms
+            )
+
+            _youtube_chat_polling_interval_ms = (
+                interval_ms
+            )
+
+            _youtube_chat_next_poll_at = (
+                time.time()
+                + (interval_ms / 1000.0)
+            )
+
+            return {
+                "live": True,
+                "chat_available": True,
+                "live_chat_id":
+                    _youtube_chat_live_chat_id,
+                "polling_interval_ms":
+                    _youtube_chat_polling_interval_ms,
+                "messages":
+                    list(_youtube_chat_messages)
+            }
 
     except HTTPException:
         raise
 
     except Exception as e:
-        print("YouTube chat error:", e, flush=True)
+        print(
+            "YouTube chat error:",
+            repr(e),
+            flush=True
+        )
+
         raise HTTPException(
             status_code=500,
-            detail=f"YouTube sohbet hatası: {e}"
+            detail="YouTube sohbet hatası"
         )
+
 
 # =========================================================
 # DASHBOARD SETTINGS
@@ -2513,6 +2955,123 @@ def settings_apply_update(current, incoming):
 
     return result
 
+
+
+@app.get("/api/kick/live")
+def kick_live():
+    """
+    Kick kanalının canlı durumunu ve izleyici
+    sayısını döndürür.
+    """
+    import urllib.request
+    import urllib.parse
+
+    settings = settings_load()
+
+    kick_settings = settings.get("kick") or {}
+
+    channel = settings_clean_string(
+        kick_settings.get("channel", ""),
+        255
+    ).strip()
+
+    if not channel:
+        return {
+            "live": False,
+            "viewers": 0,
+            "configured": False
+        }
+
+    if "://" in channel:
+        try:
+            parsed=urllib.parse.urlparse(channel)
+            channel=(
+                parsed.path
+                .strip("/")
+                .split("/")[0]
+            )
+        except Exception:
+            pass
+
+    channel=channel.strip().strip("/")
+
+    if not channel:
+        return {
+            "live": False,
+            "viewers": 0,
+            "configured": False
+        }
+
+    url=(
+        "https://kick.com/api/v2/channels/"
+        + urllib.parse.quote(channel)
+    )
+
+    request=urllib.request.Request(
+        url,
+        headers={
+            "Accept":"application/json",
+            "User-Agent":"Mozilla/5.0"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=10
+        ) as response:
+            data=json.loads(
+                response.read().decode("utf-8")
+            )
+
+    except Exception as e:
+        print(
+            "Kick live lookup error:",
+            repr(e),
+            flush=True
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Kick canlı yayın bilgisi alınamadı"
+        )
+
+    livestream=data.get("livestream")
+
+    if not livestream:
+        return {
+            "live": False,
+            "viewers": 0,
+            "channel": channel
+        }
+
+    # Kick v2 cevabında temel alan viewer_count.
+    # Farklı cevap sürümlerine karşı birkaç güvenli
+    # fallback da bırakıyoruz.
+    raw_viewers=livestream.get("viewer_count")
+
+    if raw_viewers is None:
+        raw_viewers=livestream.get("viewers")
+
+    if raw_viewers is None:
+        raw_viewers=livestream.get(
+            "concurrent_viewers"
+        )
+
+    try:
+        viewers=(
+            int(raw_viewers)
+            if raw_viewers is not None
+            else None
+        )
+    except (TypeError,ValueError):
+        viewers=None
+
+    return {
+        "live": True,
+        "viewers": viewers,
+        "channel": channel
+    }
 
 @app.get("/api/settings")
 def get_dashboard_settings():

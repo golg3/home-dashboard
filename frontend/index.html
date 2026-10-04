@@ -84,6 +84,54 @@ body{margin:0;background:#06111c;color:#e9f2ff;font:14px system-ui,Segoe UI,sans
 .chatAuthor{font-weight:800;margin-right:6px;color:#63b8ff}
 .chatText{color:#d8e5f2;overflow-wrap:anywhere}
 .chatTime{font-size:9px;color:#60798f;margin-right:6px}
+
+.chatMessage.youtubeMessage{
+ border-left:3px solid #ff334f;
+ padding-left:8px;
+}
+
+.chatMessage.youtubeMessage .chatPlatformTag,
+.chatMessage.youtubeMessage .chatAuthor,
+.chatMessage.youtubeMessage .chatText{
+ color:#ff596d;
+}
+
+.chatMessage.kickMessage{
+ border-left:3px solid #53fc18;
+ padding-left:8px;
+}
+
+.chatMessage.kickMessage .chatPlatformTag,
+.chatMessage.kickMessage .chatAuthor,
+.chatMessage.kickMessage .chatText{
+ color:#53fc18;
+}
+
+.chatPlatformTag{
+ display:inline-block;
+ min-width:20px;
+ margin-right:4px;
+ font-weight:900;
+}
+
+/* OBS mute durumunda meter çalışmaya devam eder,
+   yalnızca görsel olarak gri olur. */
+.liveMeter.muted{
+ opacity:.65;
+}
+
+.liveMeter.muted .meterFill{
+ background:#75818b !important;
+}
+
+.liveMeter.muted .meterTrack{
+ filter:grayscale(1);
+}
+
+.liveMeter.muted .meterDb,
+.liveMeter.muted .meterChannel > span{
+ color:#8c98a2 !important;
+}
 #youtubeChatStatus.chatOnline,#kickChatStatus.chatOnline{color:#22df82}
 #youtubeChatStatus.chatOffline,#kickChatStatus.chatOffline{color:#ff5964}
 @media(max-width:700px){
@@ -747,30 +795,64 @@ body{margin:0;background:#06111c;color:#e9f2ff;font:14px system-ui,Segoe UI,sans
 <div class="small">OBS Studio yayın kontrolü</div>
 </div>
 </header>
+<div class="card" style="margin-top:12px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+
+    <div style="background:#081722;border:1px solid #173149;border-radius:12px;padding:12px">
+      <div class="small">⏱ Yayın Süresi</div>
+      <div id="streamDuration" style="font-size:22px;font-weight:900;margin-top:4px">
+        00:00:00
+      </div>
+    </div>
+
+    <div style="background:#081722;border:1px solid #173149;border-radius:12px;padding:12px">
+      <div class="small">📡 Yayın Durumu</div>
+      <div id="streamSummaryStatus" style="font-size:16px;font-weight:900;margin-top:7px">
+        ⚫ Kapalı
+      </div>
+    </div>
+
+    <div style="background:#081722;border:1px solid #173149;border-radius:12px;padding:12px">
+      <div style="display:flex;align-items:center;gap:7px">
+        <span class="chatPlatform youtube">▶</span>
+        <b>YouTube</b>
+      </div>
+      <div style="font-size:20px;font-weight:900;margin-top:8px">
+        👁 <span id="youtubeViewers">-</span>
+      </div>
+      <div class="small">izleyici</div>
+    </div>
+
+    <div style="background:#081722;border:1px solid #173149;border-radius:12px;padding:12px">
+      <div style="display:flex;align-items:center;gap:7px">
+        <span class="chatPlatform kick">K</span>
+        <b>Kick</b>
+      </div>
+      <div style="font-size:20px;font-weight:900;margin-top:8px">
+        👁 <span id="kickViewers">-</span>
+      </div>
+      <div class="small">izleyici</div>
+    </div>
+
+  </div>
+</div>
+
 <div class="title" style="margin:18px 3px 9px">💬 Canlı Sohbet</div>
-<div class="streamChatGrid">
 
 <div class="card streamChatCard">
   <div class="streamChatHeader">
-    <div><span class="chatPlatform youtube">▶</span> <b>YouTube</b></div>
-    <span id="youtubeChatStatus" class="small">● Bekleniyor</span>
+    <div><b>YouTube + Kick</b></div>
+    <div style="display:flex;gap:12px">
+      <span id="youtubeChatStatus" class="small">▶ ● Bekleniyor</span>
+      <span id="kickChatStatus" class="small">K ● Bekleniyor</span>
+    </div>
   </div>
-  <div id="youtubeChat" class="streamChatMessages">
-    <div class="chatEmpty">YouTube sohbeti bekleniyor...</div>
+
+  <div id="combinedChat" class="streamChatMessages">
+    <div class="chatEmpty">Canlı sohbet bekleniyor...</div>
   </div>
 </div>
 
-<div class="card streamChatCard">
-  <div class="streamChatHeader">
-    <div><span class="chatPlatform kick">K</span> <b>Kick</b></div>
-    <span id="kickChatStatus" class="small">● Bekleniyor</span>
-  </div>
-  <div id="kickChat" class="streamChatMessages">
-    <div class="chatEmpty">Kick sohbeti bekleniyor...</div>
-  </div>
-</div>
-
-</div>
 <div class="card">
 <div style="position:relative;background:#02070c;border-radius:14px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center">
 <img id="obsPreview" style="width:100%;height:100%;object-fit:contain;display:none">
@@ -785,9 +867,13 @@ body{margin:0;background:#06111c;color:#e9f2ff;font:14px system-ui,Segoe UI,sans
 <span class="small" id="obsConnection">Bağlanıyor...</span>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-<button id="obsStart" style="padding:13px;border-radius:12px;border:1px solid #23784b;background:#103522;color:white;font-weight:800">🔴 Yayını Başlat</button>
-<button id="obsStop" style="padding:13px;border-radius:12px;border:1px solid #7d3039;background:#38191f;color:white;font-weight:800">⏹ Yayını Durdur</button>
+<div style="margin-top:12px">
+<button id="obsStreamToggle"
+        data-streaming="0"
+        disabled
+        style="width:100%;padding:14px;border-radius:12px;border:1px solid #23784b;background:#103522;color:white;font-weight:900;font-size:14px">
+  🔴 Yayını Başlat
+</button>
 </div>
 </div>
 
@@ -849,6 +935,67 @@ body{margin:0;background:#06111c;color:#e9f2ff;font:14px system-ui,Segoe UI,sans
   <div class="settingsField full">
    <label>Redirect URI</label>
    <input id="settingsYoutubeRedirect" class="settingsInput" autocomplete="off">
+  </div>
+
+  <div class="settingsField full">
+   <div style="
+    margin-top:8px;
+    padding:14px;
+    border:1px solid #1a3852;
+    border-radius:12px;
+    background:#071725
+   ">
+    <div style="
+     display:flex;
+     align-items:center;
+     justify-content:space-between;
+     gap:10px;
+     margin-bottom:10px
+    ">
+     <div>
+      <div style="font-weight:800;color:#e9f2ff">
+       YouTube Hesabı
+      </div>
+      <div style="
+       font-size:10px;
+       color:#7890a8;
+       margin-top:3px
+      ">
+       Dashboard'un YouTube hesabına erişimi
+      </div>
+     </div>
+
+     <span id="settingsYoutubeAccountStatus"
+           class="settingsStatus">
+      ● Kontrol ediliyor
+     </span>
+    </div>
+
+    <div id="settingsYoutubeAccountInfo"
+         class="settingsStatus"
+         style="margin:0 0 10px">
+     YouTube bağlantısı kontrol ediliyor...
+    </div>
+
+    <button id="settingsYoutubeConnect"
+            type="button"
+            class="settingsSave"
+            style="width:100%;display:none">
+     ▶ YouTube'a Bağlan
+    </button>
+
+    <button id="settingsYoutubeDisconnect"
+            type="button"
+            class="settingsReload"
+            style="
+             width:100%;
+             display:none;
+             border-color:#74343b;
+             background:#35171b
+            ">
+     Bağlantıyı Kes
+    </button>
+   </div>
   </div>
  </div>
 </div>
@@ -1214,6 +1361,114 @@ let obsPreviewTimer=null;
 let obsStatusTimer=null;
 let obsConnected=false;
 let obsDetailsLoaded=false;
+let obsStreaming=false;
+let obsStreamSeconds=0;
+let obsStreamClockTimer=null;
+
+function parseObsTimecode(value){
+ const parts=String(value || "00:00:00").split(":");
+
+ if(parts.length!==3)
+  return 0;
+
+ return Math.floor(
+  (Number(parts[0]) || 0)*3600+
+  (Number(parts[1]) || 0)*60+
+  (parseFloat(parts[2]) || 0)
+ );
+}
+
+function formatStreamDuration(total){
+ total=Math.max(0,Math.floor(Number(total) || 0));
+
+ const h=Math.floor(total/3600);
+ const m=Math.floor((total%3600)/60);
+ const sec=total%60;
+
+ return (
+  String(h).padStart(2,"0")+":"+
+  String(m).padStart(2,"0")+":"+
+  String(sec).padStart(2,"0")
+ );
+}
+
+function renderStreamDuration(){
+ const el=document.getElementById("streamDuration");
+
+ if(el)
+  el.textContent=formatStreamDuration(obsStreamSeconds);
+}
+
+function stopStreamClock(reset=false){
+ if(obsStreamClockTimer){
+  clearInterval(obsStreamClockTimer);
+  obsStreamClockTimer=null;
+ }
+
+ if(reset){
+  obsStreamSeconds=0;
+  renderStreamDuration();
+ }
+}
+
+function startStreamClock(timecode){
+ obsStreamSeconds=parseObsTimecode(timecode);
+ renderStreamDuration();
+
+ if(obsStreamClockTimer)
+  return;
+
+ obsStreamClockTimer=setInterval(function(){
+  if(!obsStreaming)
+   return;
+
+  obsStreamSeconds++;
+  renderStreamDuration();
+ },1000);
+}
+
+function updateObsStreamButton(streaming,connected=true){
+ const button=document.getElementById("obsStreamToggle");
+ const summary=document.getElementById("streamSummaryStatus");
+
+ obsStreaming=Boolean(streaming);
+
+ if(!button)
+  return;
+
+ if(!connected){
+  button.disabled=true;
+  button.dataset.streaming="0";
+  button.textContent="🔴 Yayını Başlat";
+  button.style.background="#172531";
+  button.style.borderColor="#34495a";
+
+  if(summary)
+   summary.textContent="⚫ OBS Kapalı";
+
+  return;
+ }
+
+ button.disabled=false;
+
+ if(obsStreaming){
+  button.dataset.streaming="1";
+  button.textContent="⏹ Yayını Durdur";
+  button.style.background="#38191f";
+  button.style.borderColor="#7d3039";
+
+  if(summary)
+   summary.textContent="🔴 CANLI";
+ }else{
+  button.dataset.streaming="0";
+  button.textContent="🔴 Yayını Başlat";
+  button.style.background="#103522";
+  button.style.borderColor="#23784b";
+
+  if(summary)
+   summary.textContent="⚫ Yayın Kapalı";
+ }
+}
 
 function obsEsc(v){
  return String(v ?? "").replace(/[&<>"']/g,function(c){
@@ -1265,12 +1520,12 @@ async function loadObsStatus(){
 
   if(d.streaming){
    document.getElementById("obsLive").textContent="🔴 CANLI";
-   document.getElementById("obsStart").disabled=true;
-   document.getElementById("obsStop").disabled=false;
+   updateObsStreamButton(true,true);
+   startStreamClock(d.stream_timecode);
   }else{
    document.getElementById("obsLive").textContent="⚫ Yayın kapalı";
-   document.getElementById("obsStart").disabled=false;
-   document.getElementById("obsStop").disabled=true;
+   updateObsStreamButton(false,true);
+   stopStreamClock(true);
   }
 
   /*
@@ -1309,8 +1564,8 @@ async function loadObsStatus(){
   document.getElementById("obsCurrentScene").textContent="-";
   document.getElementById("obsLive").textContent="⚫ OBS kapalı";
 
-  document.getElementById("obsStart").disabled=true;
-  document.getElementById("obsStop").disabled=true;
+  updateObsStreamButton(false,false);
+  stopStreamClock(true);
 
   if(obsPreviewTimer){
    clearInterval(obsPreviewTimer);
@@ -1376,7 +1631,7 @@ async function loadObsAudio(){
 
   el.innerHTML=data.map(function(a){
    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #173149">'+
-    '<div style="flex:1;min-width:0"><b>'+obsEsc(a.name)+'</b><div class="liveMeter" data-meter="'+obsEsc(a.name)+'"><div class="meterChannel"><span>L</span><div class="meterTrack"><div class="meterFill"></div></div><b class="meterDb">-60.0 dB</b></div><div class="meterChannel meterRight"><span>R</span><div class="meterTrack"><div class="meterFill"></div></div><b class="meterDb">-60.0 dB</b></div></div></div>'+
+    '<div style="flex:1;min-width:0"><b>'+obsEsc(a.name)+'</b><div class="liveMeter '+(a.muted ? "muted" : "")+'" data-meter="'+obsEsc(a.name)+'"><div class="meterChannel"><span>L</span><div class="meterTrack"><div class="meterFill"></div></div><b class="meterDb">-60.0 dB</b></div><div class="meterChannel meterRight"><span>R</span><div class="meterTrack"><div class="meterFill"></div></div><b class="meterDb">-60.0 dB</b></div></div></div>'+
 
     '<button class="obsMute" data-input="'+obsEsc(a.name)+'" data-muted="'+(a.muted?"1":"0")+'" style="padding:9px 12px;border-radius:10px;border:1px solid #24445f;background:#0b2032;color:white">'+
     (a.muted ? "🔇 Sessiz" : "🔊 Açık")+
@@ -1424,27 +1679,63 @@ async function loadObsPreview(){
  }
 }
 
-document.getElementById("obsStart").addEventListener("click",async function(){
- if(!confirm("Canlı yayını başlatmak istiyor musun?")) return;
+document.getElementById("obsStreamToggle")
+.addEventListener("click",async function(){
 
- try{
-  await obsPost("/api/obs/stream/start");
-  await loadObsStatus();
- }catch(e){
-  alert("Yayın başlatılamadı: "+e.message);
+ if(!obsConnected)
+  return;
+
+ const streaming=this.dataset.streaming==="1";
+
+ if(streaming){
+
+  if(!confirm(
+   "Canlı yayını durdurmak istiyor musun?"
+  ))
+   return;
+
+  try{
+   this.disabled=true;
+
+   await obsPost(
+    "/api/obs/stream/stop"
+   );
+
+   await loadObsStatus();
+
+  }catch(e){
+   alert(
+    "Yayın durdurulamadı: "+e.message
+   );
+  }
+
+ }else{
+
+  if(!confirm(
+   "Canlı yayını başlatmak istiyor musun?"
+  ))
+   return;
+
+  try{
+   this.disabled=true;
+
+   await obsPost(
+    "/api/obs/stream/start"
+   );
+
+   await loadObsStatus();
+
+  }catch(e){
+   alert(
+    "Yayın başlatılamadı: "+e.message
+   );
+  }
  }
+
+ if(obsConnected)
+  this.disabled=false;
 });
 
-document.getElementById("obsStop").addEventListener("click",async function(){
- if(!confirm("Canlı yayını durdurmak istiyor musun?")) return;
-
- try{
-  await obsPost("/api/obs/stream/stop");
-  await loadObsStatus();
- }catch(e){
-  alert("Yayın durdurulamadı: "+e.message);
- }
-});
 
 async function startObsUI(){
 
@@ -1790,6 +2081,194 @@ function connectObsAudioMeter(){
 
 <script>
 /* YOUTUBE LIVE CHAT */
+let streamViewerTimer=null;
+let youtubeViewerNextCheck=0;
+let kickViewerNextCheck=0;
+
+function setViewerValue(id,value){
+ const el=document.getElementById(id);
+
+ if(!el)
+  return;
+
+ if(
+  value===null ||
+  value===undefined ||
+  value===""
+ ){
+  el.textContent="-";
+  return;
+ }
+
+ const number=Number(value);
+
+ if(Number.isFinite(number)){
+  el.textContent=
+   number.toLocaleString("tr-TR");
+ }else{
+  el.textContent="-";
+ }
+}
+
+async function loadYouTubeViewers(){
+ const now=Date.now();
+
+ if(now < youtubeViewerNextCheck)
+  return;
+
+ /*
+  * Normal durumda 60 saniye.
+  * Kota cevabı gelirse backend'in retry_after
+  * değerine göre daha uzun beklenir.
+  */
+ youtubeViewerNextCheck=now+60000;
+
+ try{
+  const response=await fetch(
+   "/api/youtube/viewers",
+   {cache:"no-store"}
+  );
+
+  if(response.status===429){
+   let retrySeconds=3600;
+
+   try{
+    const data=await response.json();
+    const detail=data.detail || {};
+
+    const parsed=Number(
+     detail.retry_after
+    );
+
+    if(
+     Number.isFinite(parsed) &&
+     parsed>0
+    ){
+     retrySeconds=parsed;
+    }
+   }catch(e){}
+
+   youtubeViewerNextCheck=
+    Date.now()+
+    Math.max(
+     60000,
+     retrySeconds*1000
+    );
+
+   setViewerValue(
+    "youtubeViewers",
+    null
+   );
+
+   return;
+  }
+
+  if(!response.ok)
+   throw new Error(
+    "HTTP "+response.status
+   );
+
+  const data=await response.json();
+
+  if(!data.live){
+   setViewerValue(
+    "youtubeViewers",
+    0
+   );
+   return;
+  }
+
+  setViewerValue(
+   "youtubeViewers",
+   data.viewers
+  );
+
+ }catch(e){
+  console.error(
+   "YouTube viewers:",
+   e
+  );
+
+  setViewerValue(
+   "youtubeViewers",
+   null
+  );
+ }
+}
+
+async function loadKickViewers(){
+ const now=Date.now();
+
+ if(now < kickViewerNextCheck)
+  return;
+
+ kickViewerNextCheck=now+30000;
+
+ try{
+  const response=await fetch(
+   "/api/kick/live",
+   {cache:"no-store"}
+  );
+
+  if(!response.ok)
+   throw new Error(
+    "HTTP "+response.status
+   );
+
+  const data=await response.json();
+
+  if(!data.live){
+   setViewerValue(
+    "kickViewers",
+    0
+   );
+   return;
+  }
+
+  setViewerValue(
+   "kickViewers",
+   data.viewers
+  );
+
+ }catch(e){
+  console.error(
+   "Kick viewers:",
+   e
+  );
+
+  setViewerValue(
+   "kickViewers",
+   null
+  );
+ }
+}
+
+async function refreshStreamViewers(){
+ await Promise.allSettled([
+  loadYouTubeViewers(),
+  loadKickViewers()
+ ]);
+}
+
+function startStreamViewerPolling(){
+ if(streamViewerTimer)
+  return;
+
+ refreshStreamViewers();
+
+ /*
+  * Scheduler 10 saniyede bir uyanır.
+  * Fakat gerçek API çağrıları:
+  *
+  * YouTube -> 60 saniye
+  * Kick    -> 30 saniye
+  */
+ streamViewerTimer=setInterval(
+  refreshStreamViewers,
+  10000
+ );
+}
+
 let youtubeChatTimer = null;
 let youtubeNextPageToken = null;
 let youtubeLiveChatId = null;
@@ -1811,15 +2290,25 @@ function youtubeSetStatus(text,online=false){
 }
 
 function youtubeShowEmpty(text){
- const box=document.getElementById("youtubeChat");
+ const box=document.getElementById("combinedChat");
  if(!box) return;
 
+ /*
+  * Ortak chat'te herhangi bir gerçek mesaj varsa
+  * boş durum mesajı mevcut mesajları silmesin.
+  */
+ if(box.querySelector(".chatMessage"))
+  return;
+
  box.innerHTML=
-  '<div class="chatEmpty">'+youtubeEscape(text)+'</div>';
+  '<div class="chatEmpty">'+
+  youtubeEscape(text)+
+  '</div>';
 }
 
+
 function youtubeAddMessage(msg){
- const box=document.getElementById("youtubeChat");
+ const box=document.getElementById("combinedChat");
  if(!box || !msg || !msg.id) return;
 
  if(youtubeSeenMessages.has(msg.id)) return;
@@ -1829,7 +2318,7 @@ function youtubeAddMessage(msg){
  if(empty) empty.remove();
 
  const row=document.createElement("div");
- row.className="chatMessage";
+ row.className="chatMessage youtubeMessage";
 
  let time="";
  if(msg.published_at){
@@ -1848,7 +2337,8 @@ function youtubeAddMessage(msg){
  else if(msg.is_member) badge=" ⭐";
 
  row.innerHTML=
-  '<span class="chatTime">'+youtubeEscape(time)+'</span>'+
+  '<span class="chatPlatformTag">▶</span>'+
+   '<span class="chatTime">'+youtubeEscape(time)+'</span>'+
   '<span class="chatAuthor">'+
    youtubeEscape(msg.author || "YouTube")+
    badge+
@@ -1885,22 +2375,7 @@ async function pollYouTubeChat(){
  youtubePolling=true;
 
  try{
-  let url="/api/youtube/chat";
-
-  const params=new URLSearchParams();
-
-  if(youtubeLiveChatId){
-   params.set("live_chat_id",youtubeLiveChatId);
-  }
-
-  if(youtubeNextPageToken){
-   params.set("page_token",youtubeNextPageToken);
-  }
-
-  const qs=params.toString();
-  if(qs) url+="?"+qs;
-
-  const response=await fetch(url,{
+  const response=await fetch("/api/youtube/chat",{
    cache:"no-store"
   });
 
@@ -1983,18 +2458,23 @@ async function pollYouTubeChat(){
    youtubeNextPageToken=null;
    youtubeSeenMessages.clear();
 
-   const box=document.getElementById("youtubeChat");
-   if(box) box.innerHTML="";
+   const box=document.getElementById("combinedChat");
+
+   if(box){
+    box.querySelectorAll(".youtubeMessage")
+     .forEach(function(row){
+      row.remove();
+     });
+   }
   }
 
   youtubeLiveChatId=data.live_chat_id || null;
-  youtubeNextPageToken=data.next_page_token || null;
 
   youtubeSetStatus("● Canlı",true);
 
   (data.messages || []).forEach(youtubeAddMessage);
 
-  const box=document.getElementById("youtubeChat");
+  const box=document.getElementById("combinedChat");
 
   if(
    box &&
@@ -2025,6 +2505,7 @@ function startYouTubeChat(){
  }
 
  pollYouTubeChat();
+startStreamViewerPolling();
 }
 
 startYouTubeChat();
@@ -2058,17 +2539,21 @@ function kickSetStatus(text,online=false){
 }
 
 function kickShowEmpty(text){
- const box=document.getElementById("kickChat");
+ const box=document.getElementById("combinedChat");
  if(!box) return;
 
- if(box.querySelector(".chatMessage")) return;
+ if(box.querySelector(".chatMessage"))
+  return;
 
  box.innerHTML=
-  '<div class="chatEmpty">'+kickEscape(text)+'</div>';
+  '<div class="chatEmpty">'+
+  kickEscape(text)+
+  '</div>';
 }
 
+
 function kickAddMessage(data){
- const box=document.getElementById("kickChat");
+ const box=document.getElementById("combinedChat");
  if(!box || !data) return;
 
  const id=
@@ -2112,10 +2597,11 @@ function kickAddMessage(data){
  }
 
  const row=document.createElement("div");
- row.className="chatMessage";
+ row.className="chatMessage kickMessage";
 
  row.innerHTML=
-  '<span class="chatTime">'+kickEscape(time)+'</span>'+
+  '<span class="chatPlatformTag">K</span>'+
+   '<span class="chatTime">'+kickEscape(time)+'</span>'+
   '<span class="chatAuthor">'+kickEscape(author)+'</span>'+
   '<span class="chatText">'+kickEscape(data.content || "")+'</span>';
 
@@ -2367,6 +2853,226 @@ function settingsSecretInfo(id,isSet,label){
  }
 }
 
+async function loadYoutubeAccountStatus(){
+ const status=document.getElementById(
+  "settingsYoutubeAccountStatus"
+ );
+ const info=document.getElementById(
+  "settingsYoutubeAccountInfo"
+ );
+ const connect=document.getElementById(
+  "settingsYoutubeConnect"
+ );
+ const disconnect=document.getElementById(
+  "settingsYoutubeDisconnect"
+ );
+
+ if(!status || !info || !connect || !disconnect)
+  return;
+
+ status.textContent="● Kontrol ediliyor";
+ status.className="settingsStatus";
+
+ info.textContent="YouTube bağlantısı kontrol ediliyor...";
+
+ connect.style.display="none";
+ disconnect.style.display="none";
+
+ try{
+  const r=await fetch(
+   "/api/youtube/status",
+   {cache:"no-store"}
+  );
+
+  let data={};
+
+  try{
+   data=await r.json();
+  }catch(e){}
+
+  if(!r.ok)
+   throw new Error(
+    data.detail || ("HTTP "+r.status)
+   );
+
+  if(!data.configured){
+   status.textContent="● Yapılandırma eksik";
+   status.className="settingsStatus warn";
+
+   info.textContent=
+    "Önce Client ID, Client Secret ve Redirect URI bilgilerini kaydet.";
+
+   connect.style.display="none";
+   disconnect.style.display="none";
+   return;
+  }
+
+  if(data.authenticated){
+   status.textContent="● Bağlı";
+   status.className="settingsStatus ok";
+
+   info.textContent=
+    "YouTube hesabı dashboard'a bağlı.";
+
+   connect.style.display="none";
+   disconnect.style.display="block";
+   return;
+  }
+
+  status.textContent="● Bağlı değil";
+  status.className="settingsStatus warn";
+
+  info.textContent=
+   "YouTube hesabına erişim için Google ile yetkilendir.";
+
+  connect.style.display="block";
+  disconnect.style.display="none";
+
+ }catch(e){
+  console.error(
+   "YouTube account status:",
+   e
+  );
+
+  status.textContent="● Kontrol hatası";
+  status.className="settingsStatus error";
+
+  info.textContent=
+   "YouTube bağlantı durumu alınamadı.";
+
+  connect.style.display="none";
+  disconnect.style.display="none";
+ }
+}
+
+
+function connectYoutubeAccount(){
+ const width=560;
+ const height=720;
+
+ const left=Math.max(
+  0,
+  Math.round(
+   (window.screen.width-width)/2
+  )
+ );
+
+ const top=Math.max(
+  0,
+  Math.round(
+   (window.screen.height-height)/2
+  )
+ );
+
+ const popup=window.open(
+  "/api/youtube/auth",
+  "youtubeOAuth",
+  "width="+width+
+  ",height="+height+
+  ",left="+left+
+  ",top="+top+
+  ",resizable=yes,scrollbars=yes"
+ );
+
+ if(!popup){
+  const info=document.getElementById(
+   "settingsYoutubeAccountInfo"
+  );
+
+  if(info){
+   info.textContent=
+    "Popup açılamadı. Tarayıcı popup engelini kontrol et.";
+   info.className="settingsStatus error";
+  }
+ }
+}
+
+
+async function disconnectYoutubeAccount(){
+ const button=document.getElementById(
+  "settingsYoutubeDisconnect"
+ );
+ const info=document.getElementById(
+  "settingsYoutubeAccountInfo"
+ );
+
+ if(
+  !confirm(
+   "YouTube hesabının dashboard bağlantısı kaldırılsın mı?"
+  )
+ ){
+  return;
+ }
+
+ if(button)
+  button.disabled=true;
+
+ try{
+  if(info){
+   info.textContent=
+    "YouTube bağlantısı kaldırılıyor...";
+   info.className="settingsStatus";
+  }
+
+  const r=await fetch(
+   "/api/youtube/disconnect",
+   {
+    method:"POST",
+    cache:"no-store"
+   }
+  );
+
+  let data={};
+
+  try{
+   data=await r.json();
+  }catch(e){}
+
+  if(!r.ok){
+   throw new Error(
+    data.detail || ("HTTP "+r.status)
+   );
+  }
+
+  await loadYoutubeAccountStatus();
+
+ }catch(e){
+  console.error(
+   "YouTube disconnect:",
+   e
+  );
+
+  if(info){
+   info.textContent=
+    "Bağlantı kaldırılamadı: "+e.message;
+   info.className="settingsStatus error";
+  }
+
+ }finally{
+  if(button)
+   button.disabled=false;
+ }
+}
+
+
+window.addEventListener(
+ "message",
+ function(event){
+  if(event.origin!==window.location.origin)
+   return;
+
+  if(
+   !event.data ||
+   event.data.type!=="youtube-oauth-success"
+  ){
+   return;
+  }
+
+  loadYoutubeAccountStatus();
+ }
+);
+
+
 async function loadDashboardSettings(){
  const message=document.getElementById("settingsMessage");
 
@@ -2462,6 +3168,8 @@ async function loadDashboardSettings(){
   }
 
   updateDockerSettingsVisibility();
+
+  await loadYoutubeAccountStatus();
 
   dashboardSettingsLoaded=true;
 
@@ -2635,6 +3343,18 @@ document.getElementById("settingsSave")
 
 document.getElementById("settingsReload")
  ?.addEventListener("click",loadDashboardSettings);
+
+document.getElementById("settingsYoutubeConnect")
+ ?.addEventListener(
+  "click",
+  connectYoutubeAccount
+ );
+
+document.getElementById("settingsYoutubeDisconnect")
+ ?.addEventListener(
+  "click",
+  disconnectYoutubeAccount
+ );
 
 document.getElementById("settingsDockerType")
  ?.addEventListener("change",updateDockerSettingsVisibility);
@@ -3270,7 +3990,7 @@ async function loadHomeObsAudio(){
 
      </div>
 
-     <div class="liveMeter"
+     <div class="liveMeter ${a.muted ? "muted" : ""}"
           data-meter="${obsEsc(a.name)}">
 
       <div class="meterChannel">
