@@ -103,3 +103,26 @@ Aşağıdaki dosyalar Git repository'sine dahil edilmez:
 - backup ve geçici dosyalar
 
 Gerçek token, parola, OAuth Client Secret veya diğer credential bilgilerini repository'ye commit etmeyin.
+
+## 📸 Screenshots
+
+### Dashboard
+![Dashboard](Screenshot/1.png)
+
+### Personal PC
+![Personal PC](Screenshot/2.png)
+
+### Host
+![Host](Screenshot/3.png)
+
+### Docker
+![Docker](Screenshot/4.png)
+
+### Stream
+![Stream](Screenshot/5.png)
+
+### Weather
+![Weather](Screenshot/6.png)
+
+### Settings
+![Settings](Screenshot/7.png)
